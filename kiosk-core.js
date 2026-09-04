@@ -27,7 +27,7 @@
   const SPEEDS = [0.5, 0.75, 1, 1.5, 2];
   let speed = 1;
   try { speed = parseFloat(localStorage.getItem("kiosk-speed")) || 1; } catch (e) {}
-  let st, pi = 0, si = 0, pass = 0, manual = false, idleT = null, idleTick = null, idleLeft = 0, hiddenPaused = false;
+  let st, pi = 0, si = 0, pass = 0, manual = false, idleT = null, idleTick = null, idleLeft = 0, hiddenPaused = false, swapT = null;
   const total = T[6] + HOLD_MS;   // czas bazowy scenariusza; realny czas = total / speed
   let view = null;
 
@@ -172,7 +172,8 @@
     let p = product();
     Array.prototype.forEach.call(refs.rail.children, function (b, j) { b.classList.toggle("on", j === k); b.setAttribute("aria-pressed", j === k ? "true" : "false"); });
     refs.copy.classList.add("swap");
-    setTimeout(function () { refs.name.textContent = p.name; refs.tag.innerHTML = p.tagline; refs.copy.classList.remove("swap"); }, 300);
+    clearTimeout(swapT);   // szybka zmiana produktu: poprzednia nazwa nie mignie
+    swapT = setTimeout(function () { refs.name.textContent = p.name; refs.tag.innerHTML = p.tagline; refs.copy.classList.remove("swap"); }, 300);
     renderTabs(p);
     view = viewFor(p);
     st.setAttribute("data-product", p.id);
@@ -298,7 +299,7 @@
     wakeLock();
   }
 
-  // ─── Samotest (?test=1): każdy scenariusz każdego produktu odtwarzany do końca przy tempie 2×; wynik w data-test na scenie i w konsoli.
+  // ─── Samotest (?test=1): każdy scenariusz każdego produktu odtwarzany do końca przy tempie 4×; wynik w data-test na scenie i w konsoli.
   //     Uruchamiany bez sieci w headless Chrome przez scripts/smoke.sh; błąd skryptu lub scenariusz, który nie dochodzi do fazy 7, oznacza porażkę.
   //     ?tick=timer (bez testu): ticker na setTimeout zamiast rAF, do zrzutów ekranu w headless ───
   function selfTest() {
@@ -328,12 +329,20 @@
   }
 
   // ─── Watchdog: całodzienna praca stoiska. Błąd skryptu przeładowuje stronę; co kilka godzin przeładowanie na granicy scenariusza zwalnia pamięć ───
-  const RELOAD_AFTER_ERROR_MS = 5000, RELOAD_EVERY_MS = 4 * 3600 * 1000;
+  //     Błąd tuż po starcie (np. uszkodzony plik) nie zapętla przeładowań co 5 s: po trzech szybkich próbach odstęp rośnie do minuty.
+  const RELOAD_AFTER_ERROR_MS = 5000, RELOAD_BACKOFF_MS = 60000, RELOAD_QUICK_LIMIT = 3, RELOAD_QUICK_WINDOW_MS = 30000, RELOAD_EVERY_MS = 4 * 3600 * 1000;
   let reloadDue = false;
   function watchdog() {
-    function reload() { try { sessionStorage.setItem("kiosk-resume", pi + "," + si); } catch (e) {} location.reload(); }
+    let quick = 0;
+    try { quick = parseInt(sessionStorage.getItem("kiosk-reloads") || "0", 10) || 0; sessionStorage.removeItem("kiosk-reloads"); } catch (e) {}
+    let bootAt = Date.now();
+    function reload() {
+      let soon = Date.now() - bootAt < RELOAD_QUICK_WINDOW_MS;
+      try { sessionStorage.setItem("kiosk-resume", pi + "," + si); sessionStorage.setItem("kiosk-reloads", String(soon ? quick + 1 : 0)); } catch (e) {}
+      location.reload();
+    }
     let errT = null;
-    function onError() { if (!errT && !TEST) { errT = setTimeout(reload, RELOAD_AFTER_ERROR_MS); } }
+    function onError() { if (!errT && !TEST) { errT = setTimeout(reload, quick >= RELOAD_QUICK_LIMIT ? RELOAD_BACKOFF_MS : RELOAD_AFTER_ERROR_MS); } }
     addEventListener("error", onError);
     addEventListener("unhandledrejection", onError);
     setTimeout(function () { reloadDue = true; }, RELOAD_EVERY_MS);
