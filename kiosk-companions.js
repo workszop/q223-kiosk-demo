@@ -1,15 +1,19 @@
 /* KIOSK COMPANIONS - postaci na scenie (robot.js): robot (reżyser z robot.js), kot (trasa po górnych krawędziach kart albo za robotem)
    i bohaterowie (easter eggi: spider, iron, hulk). Włączane z ustawień, zapamiętane w localStorage, wszystkie na wspólnym tickerze kiosku.
    Płótna i dymki leżą w .k-frame, więc liczą w układzie kadru (0,0 = lewy górny róg kadru); K.frameOrigin() przelicza prostokąty kart z układu okna.
-   K (z kiosk-core.js): st, refs (robotBtn, catBtn, heroBtn, view), px, scale, frameRect, frameOrigin, ticker, speed (funkcja: tempo).
+   K (z kiosk-core.js): st, refs (robotBtn, catBtn, heroBtn, view), px, scale, frameRect, frameOrigin, ticker, speed (funkcja: tempo), persist (false = bez localStorage).
    Zwraca: setRobot, setCat, setHero, heroTick (z play(): co drugi scenariusz planuje bohatera), robotOn/catOn/heroOn, hero(), cat(). */
 window.KIOSK_COMPANIONS = function (K) {
   "use strict";
-  const st = K.st, refs = K.refs, px = K.px, scale = K.scale, frameRect = K.frameRect, frameOrigin = K.frameOrigin, ticker = K.ticker, tempo = K.speed;
+  const st = K.st, refs = K.refs, px = K.px, scale = K.scale, frameRect = K.frameRect, frameOrigin = K.frameOrigin, ticker = K.ticker, tempo = K.speed, PERSIST = K.persist !== false;
 
   // Dymek nad głową postaci (układ kadru): wyśrodkowany nad punktem head, cały w kadrze, nie wyżej niż px(40) od góry
+  function sayBubble(bubble, text) {   // tekst + pomiar szerokości raz, nie w każdej klatce
+    bubble.textContent = text; bubble.classList.add("on");
+    bubble.half = bubble.offsetWidth / 2 + px(12);
+  }
   function placeBubble(bubble, head, dy) {
-    let fr = frameRect(), half = bubble.offsetWidth / 2 + px(12);
+    let fr = frameRect(), half = bubble.half || bubble.offsetWidth / 2 + px(12);
     bubble.style.left = Math.min(Math.max(head[0], half), fr.width - half) + "px";
     bubble.style.top = Math.max(head[1] + dy, px(40)) + "px";
   }
@@ -34,8 +38,8 @@ window.KIOSK_COMPANIONS = function (K) {
     ROBOT_REMARKS[k] = mixed;
   });
   // Wspólna obsługa przełącznika postaci: localStorage, atrybut sceny, przycisk, płótno (pokazane przed pomiarem), dymek
-  function companionToggle(key, btn, canvas, bubble, on) {
-    try { localStorage.setItem("kiosk-" + key, on ? "1" : "0"); } catch (e) {}
+  function companionToggle(key, btn, canvas, bubble, on, persist) {   // persist === false: bez zapisu (parametr URL, samotest)
+    if (persist !== false && PERSIST) { try { localStorage.setItem("kiosk-" + key, on ? "1" : "0"); } catch (e) {} }
     st.setAttribute("data-" + key + "-enabled", on ? "1" : "0");
     btn.setAttribute("aria-pressed", on ? "true" : "false");
     btn.lastChild.textContent = on ? "włączony" : "wyłączony";
@@ -43,10 +47,10 @@ window.KIOSK_COMPANIONS = function (K) {
     if (bubble) { bubble.classList.toggle("off", !on); }
   }
   let robot = null, robotOn = false;
-  function setRobot(on) {
+  function setRobot(on, persist) {
     robotOn = !!on;
     let canvas = document.getElementById("robot"), bubble = document.getElementById("robotBubble");
-    companionToggle("robot", refs.robotBtn, canvas, bubble, robotOn);
+    companionToggle("robot", refs.robotBtn, canvas, bubble, robotOn, persist);
     if (robotOn && !robot && window.Robot && canvas) {
       let renderer = window.Robot.create({ canvas: canvas, smooth: true, unit: function () { return px(9); } });   // wersja wygładzona; rozmiar woksela skaluje się z kadrem
       robot = { renderer: renderer, director: window.Robot.kiosk({ renderer: renderer, stage: "#stage", view: "#kView", bubble: bubble, remarks: ROBOT_REMARKS, speed: tempo, walkSpeed: function () { return px(170); }, bounds: frameRect, origin: frameOrigin, scale: scale, ticker: ticker }) };
@@ -116,8 +120,8 @@ window.KIOSK_COMPANIONS = function (K) {
         C.stopT += dt * tempo();
         stretching = !!sp.stretch;
         yaw = stretching ? (C.dir || 1) * renderer.WALK_YAW - renderer.CAM_YAW : 0;   // przeciąganie bokiem, miauczenie twarzą do widza
-        if (sp.meow && !sp.said && C.stopT > 0.5) { sp.said = true; bubble.textContent = "Miau."; bubble.classList.add("on"); C.bubbleUntil = C.t + 1.6; }
-        if (sp.stretch && !sp.said && C.stopT > 1.4) { sp.said = true; bubble.textContent = "Mrrr."; bubble.classList.add("on"); C.bubbleUntil = C.t + 1.4; }
+        if (sp.meow && !sp.said && C.stopT > 0.5) { sp.said = true; sayBubble(bubble, "Miau."); C.bubbleUntil = C.t + 1.6; }
+        if (sp.stretch && !sp.said && C.stopT > 1.4) { sp.said = true; sayBubble(bubble, "Mrrr."); C.bubbleUntil = C.t + 1.4; }
         if (C.stopT >= sp.stop) { C.stopT = 0; C.seg += 1; if (C.seg >= C.path.length) { C.active = false; } }
       } else if (C.active) {
         let seg = C.path[C.seg];
@@ -130,7 +134,7 @@ window.KIOSK_COMPANIONS = function (K) {
         else { pose.x += dx / d * step; pose.y += dy / d * step; }
         walking = !!seg.walk; yaw = (C.dir || 1) * renderer.WALK_YAW - renderer.CAM_YAW;
         let progress = C.seg / C.path.length;
-        if (!C.meowed && progress >= C.meowAt) { C.meowed = true; bubble.textContent = Math.random() < 0.7 ? "Miau." : "Mrrr."; bubble.classList.add("on"); C.bubbleUntil = C.t + 1.6; }
+        if (!C.meowed && progress >= C.meowAt) { C.meowed = true; sayBubble(bubble, Math.random() < 0.7 ? "Miau." : "Mrrr."); C.bubbleUntil = C.t + 1.6; }
       }
       renderer.animate(dt, { walking: walking, waving: false, stretching: stretching, airborne: pose.lift > 0, yawTarget: yaw });
       if (C.bubbleUntil && (C.t > C.bubbleUntil || !C.active)) { hideBubble(); }   // dymek nie przeżywa kota (zmiana sceny, resize, koniec trasy)
@@ -151,7 +155,7 @@ window.KIOSK_COMPANIONS = function (K) {
     }
     function followStep(dt) {
       let rp = robot.renderer.pose, out = { walking: false, stretching: false, yaw: 0 }, fr = frameRect(), W = bounds.w;
-      if (!C.leaving && (C.t > C.followUntil || !robotOn || robot.director.state.layer !== "front")) { C.leaving = true; C.exitX = pose.x < fr.left + fr.width / 2 ? fr.left - W : fr.right + W; C.stretchUntil = 0; }
+      if (!C.leaving && (C.t > C.followUntil || !robotOn || robot.director.state.layer !== "front")) { C.leaving = true; C.cut = !(C.t > C.followUntil); C.exitX = pose.x < fr.left + fr.width / 2 ? fr.left - W : fr.right + W; C.stretchUntil = 0; }
       let gap = W * FOLLOW_GAP, tx = C.leaving ? C.exitX : rp.x + (pose.x < rp.x ? -gap : gap), ty = C.leaving ? pose.y : rp.y;
       let dx = tx - pose.x, dy = ty - pose.y, d = Math.hypot(dx, dy), step = px(SPEED) * dt * tempo();
       if (C.stretchUntil) {
@@ -162,10 +166,10 @@ window.KIOSK_COMPANIONS = function (K) {
       if (d > 6) {
         pose.x += dx / d * Math.min(step, d); pose.y += dy / d * Math.min(step, d);
         out.walking = true; out.yaw = C.lastYaw = Math.sign(dx) * renderer.WALK_YAW - renderer.CAM_YAW; C.idleT = 0;
-        if (!C.meowed && C.t > C.meowAt) { C.meowed = true; bubble.textContent = "Miau."; bubble.classList.add("on"); C.bubbleUntil = C.t + 1.6; }
+        if (!C.meowed && C.t > C.meowAt) { C.meowed = true; sayBubble(bubble, "Miau."); C.bubbleUntil = C.t + 1.6; }
       } else if (C.leaving) {
         C.active = false; C.mode = null;
-        if (!robotOn) { C.startAt = C.t + 0.5; }   // robot wyłączony w trakcie: kot nie znika do końca produktu, tylko rusza swoją trasą po kartach
+        if (C.cut) { C.cut = false; again(); }   // przerwane (robot wyłączony / zszedł): kot nie znika do końca produktu, tylko rusza swoją trasą po kartach; naturalny koniec: bez drugiej trasy
       } else {
         C.idleT += dt * tempo(); out.yaw = 0;   // czeka obok robota twarzą do widza
         if (C.idleT > 1.2 && Math.random() < dt * tempo() * 0.35) { C.stretchUntil = C.t + 2.4 + Math.random(); }
@@ -187,10 +191,10 @@ window.KIOSK_COMPANIONS = function (K) {
     ticker.add(function (dt) { if (catOn) { update(dt); render(); } });
     return { state: C, again: again, renderer: renderer };
   }
-  function setCat(on) {
+  function setCat(on, persist) {
     catOn = !!on;
     let canvas = document.getElementById("cat"), bubble = document.getElementById("catBubble");
-    companionToggle("cat", refs.catBtn, canvas, bubble, catOn);
+    companionToggle("cat", refs.catBtn, canvas, bubble, catOn, persist);
     if (catOn && !cat && window.Robot && canvas) {
       let renderer = window.Robot.create({ canvas: canvas, model: "cat", smooth: true, unit: function () { return px(9); } });
       cat = makeCat(renderer, canvas, bubble);
@@ -205,7 +209,7 @@ window.KIOSK_COMPANIONS = function (K) {
   const HERO_KINDS = ["spider", "iron", "hulk"], HERO_EVERY = 2;
   let hero = null, heroOn = false, heroPlays = 0, heroIx = Math.floor(Math.random() * HERO_KINDS.length);
   function makeHero(canvas, bubble) {
-    let R = {}, H = { active: false, kind: null, phase: "idle", t: 0, launchAt: 0, pending: null, dust: [], cracks: [], bubbleUntil: 0 };
+    let R = {}, H = { active: false, kind: null, phase: "idle", t: 0, launchIn: 0, pending: null, dust: [], cracks: [], bubbleUntil: 0, shakeEnd: 0, shakeLen: 0 };
     let ctx = null;
     function renderer(kind) {
       if (!R[kind]) { R[kind] = window.Robot.create({ canvas: canvas, model: kind, smooth: true, unit: kind === "hulk" ? function () { return px(12); } : function () { return px(9); } }); R[kind].pose.shadow = false; }
@@ -235,7 +239,8 @@ window.KIOSK_COMPANIONS = function (K) {
     }
     function update(dt) {
       if (!H.active) {
-        if (H.launchAt && (H.t += dt) >= H.launchAt) { H.launchAt = 0; launch(H.pending); }
+        if (H.shakeEnd) { H.shakeEnd = 0; refs.view.style.transform = ""; }   // przelot przerwany (resize) w trakcie wstrząsu
+        if (H.pending && (H.launchIn -= dt) <= 0) { let kind = H.pending; H.pending = null; launch(kind); }   // odliczanie niezależne od czasu lotu
         return;
       }
       let r = R[H.kind], p = r.pose, fr = frameRect(), W = fr.width, Hh = fr.height, L = fr.left, T = fr.top, s = scale(), k = H.kind;
@@ -302,21 +307,20 @@ window.KIOSK_COMPANIONS = function (K) {
         H.dust = H.dust.filter(function (d) { return d.a > 0; });
       }
       r.animate(dt, input);
+      shakeStep();
       if (H.bubbleUntil && (H.t > H.bubbleUntil || !H.active)) { hideBubble(); }
       H.phase = H.active ? H.phase : "idle";
       st.setAttribute("data-hero", H.active ? k + ":" + H.phase + ":" + Math.round(p.x) + "," + Math.round(p.y) : "idle");
     }
     function ease(p, pitch, lift, ds) { let k = Math.min(1, 14 * ds); p.pitch += (pitch - p.pitch) * k; p.lift += (lift - p.lift) * k; }
-    function say(text, sec) { bubble.textContent = text; bubble.classList.add("on"); H.bubbleUntil = H.t + sec; }
+    function say(text, sec) { sayBubble(bubble, text); H.bubbleUntil = H.t + sec; }
     function hideBubble() { bubble.classList.remove("on"); H.bubbleUntil = 0; }
-    function shake(sec) {
-      let t0 = performance.now(), amp = px(9);
-      (function step(now) {
-        let f = 1 - (now - t0) / (sec * 1000);
-        if (f <= 0) { refs.view.style.transform = ""; return; }
-        refs.view.style.transform = "translate(" + ((Math.random() - 0.5) * amp * f * 2).toFixed(1) + "px," + ((Math.random() - 0.5) * amp * f * 2).toFixed(1) + "px)";
-        requestAnimationFrame(step);
-      })(t0);
+    function shake(sec) { H.shakeEnd = H.t + sec; H.shakeLen = sec; }   // wstrząs sceny liczony w update() na wspólnym tickerze (nie na własnym rAF)
+    function shakeStep() {
+      if (!H.shakeEnd) { return; }
+      let f = (H.shakeEnd - H.t) / H.shakeLen, amp = px(9);
+      if (f <= 0) { H.shakeEnd = 0; refs.view.style.transform = ""; return; }
+      refs.view.style.transform = "translate(" + ((Math.random() - 0.5) * amp * f * 2).toFixed(1) + "px," + ((Math.random() - 0.5) * amp * f * 2).toFixed(1) + "px)";
     }
     function render() {
       let r = R[H.kind];
@@ -343,20 +347,20 @@ window.KIOSK_COMPANIONS = function (K) {
     }
     addEventListener("resize", function () { Object.keys(R).forEach(function (k) { R[k].resize(); }); H.active = false; hideBubble(); });   // przerwany przelot nie zostawia dymka
     ticker.add(function (dt) { if (heroOn) { update(dt); render(); } });
-    return { state: H, launch: launch, schedule: function (kind, delay) { H.pending = kind; H.launchAt = delay; H.t = 0; } };
+    return { state: H, launch: launch, schedule: function (kind, delay) { H.pending = kind; H.launchIn = delay; } };
   }
-  function setHero(on) {
+  function setHero(on, persist) {
     heroOn = !!on;
     let canvas = document.getElementById("hero"), bubble = document.getElementById("heroBubble");
-    companionToggle("hero", refs.heroBtn, canvas, bubble, heroOn);
+    companionToggle("hero", refs.heroBtn, canvas, bubble, heroOn, persist);
     if (heroOn && !hero && window.Robot && canvas) { hero = makeHero(canvas, bubble); }
-    if (hero && !heroOn) { hero.state.active = false; hero.state.launchAt = 0; hero.state.bubbleUntil = 0; bubble.classList.remove("on"); refs.view.style.transform = ""; }
+    if (hero && !heroOn) { hero.state.active = false; hero.state.pending = null; hero.state.bubbleUntil = 0; hero.state.shakeEnd = 0; bubble.classList.remove("on"); refs.view.style.transform = ""; }
   }
   // wywoływane z play(): co drugi scenariusz planuje jednego bohatera (po kolei), kilka sekund po starcie
   function heroTick() {
     heroPlays += 1;
     if (!heroOn || !hero) { return; }
-    hero.state.launchAt = 0;   // bohater w trakcie przelotu kończy go, tylko zaplanowany start przepada
+    hero.state.pending = null;   // bohater w trakcie przelotu kończy go, tylko zaplanowany start przepada
     if (heroPlays % HERO_EVERY !== 0) { return; }
     let kind = HERO_KINDS[heroIx++ % HERO_KINDS.length];
     hero.schedule(kind, 3 + Math.random() * 6);

@@ -13,6 +13,9 @@
   const LOGO = { dark: "quantica-logo-white.png", light: "quantica-logo-color.png" };
   const PRODUCTS = window.KIOSK_PRODUCTS;
   const URLP = new URLSearchParams(location.search), TEST = URLP.get("test") === "1";   // ?test=1: samotest (patrz selfTest)
+  const PERSIST = !TEST;   // samotest nie zapisuje niczego do localStorage
+  const earlyErrors = [];   // błędy od załadowania skryptu (także w Init, zanim samotest zarejestruje własne nasłuchy)
+  if (TEST) { addEventListener("error", function (e) { earlyErrors.push(String(e.message || e)); }); addEventListener("unhandledrejection", function (e) { earlyErrors.push(String(e.reason)); }); }
   const SVG = {
     prev: "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"m15 18-6-6 6-6\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></svg>",
     next: "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"m9 18 6-6-6-6\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></svg>",
@@ -37,7 +40,13 @@
   const ticker = (function () {
     let fns = [], last = performance.now();
     const raf = (TEST || URLP.get("tick") === "timer") ? function (fn) { setTimeout(function () { fn(performance.now()); }, TEST ? 50 : 16); } : requestAnimationFrame;   // headless/ukryta karta: rAF nie tyka, timer tak (test: 20 kl/s, mniej rysowania)
-    function frame(t) { let dt = Math.min(0.05, (t - last) / 1000); last = t; for (let i = 0; i < fns.length; i += 1) { fns[i](dt); } raf(frame); }
+    // pętla uzbraja się przed wywołaniami, a każdy subskrybent ma własny try/catch: błąd jednej postaci nie zatrzymuje zegara ani pozostałych;
+    // wyjątek trafia do window.onerror (watchdog / samotest) przez setTimeout
+    function frame(t) {
+      let dt = Math.min(0.05, (t - last) / 1000); last = t;
+      raf(frame);
+      for (let i = 0; i < fns.length; i += 1) { try { fns[i](dt); } catch (e) { setTimeout(function () { throw e; }, 0); } }
+    }
     raf(frame);
     return { add: function (fn) { fns.push(fn); } };
   })();
@@ -192,9 +201,9 @@
   }
   // Tryb automatyczny: jeden scenariusz z każdej symulacji, w kolejnym obiegu następny scenariusz
   function advanceAuto() {
-    if (reloadDue) { location.reload(); return; }
     let k = (pi + 1) % PRODUCTS.length;
     if (k === 0) { pass += 1; }
+    if (reloadDue) { reload({ p: k, s: pass % PRODUCTS[k].scenarios.length, pass: pass, crashes: 0 }); return; }   // okresowe przeładowanie: pętla idzie dalej od tego samego miejsca
     play(k, pass % PRODUCTS[k].scenarios.length);
   }
   function advance(dir) {
@@ -221,7 +230,11 @@
   function selectProduct(k) { touch(); play(k, 0); }
   function act(name) {
     if (name === "settings") { togglePop(); return; }
-    if (name === "full") { if (document.fullscreenElement) { document.exitFullscreen(); } else if (document.documentElement.requestFullscreen) { document.documentElement.requestFullscreen(); } return; }
+    if (name === "full") {   // odmowa (iframe, polityka uprawnień, trwająca zmiana) to nie błąd: bez .catch watchdog przeładowałby kiosk
+      let pr = document.fullscreenElement ? document.exitFullscreen() : (document.documentElement.requestFullscreen ? document.documentElement.requestFullscreen() : null);
+      if (pr && pr.catch) { pr.catch(function () {}); }
+      return;
+    }
     touch();
     if (name === "prev") { advance(-1); }
     else if (name === "next") { advance(1); }
@@ -233,10 +246,10 @@
   }
 
   // ─── Ustawienia: tempo (zapamiętane w localStorage) ───
-  function setSpeed(v) {
+  function setSpeed(v, persist) {   // persist === false: zastosuj bez zapisu (parametr URL, samotest)
     let prevSpeed = speed;
     speed = v;
-    try { localStorage.setItem("kiosk-speed", String(v)); } catch (e) {}
+    if (persist !== false && PERSIST) { try { localStorage.setItem("kiosk-speed", String(v)); } catch (e) {} }
     Array.prototype.forEach.call(refs.speeds.children, function (b) { b.classList.toggle("on", parseFloat(b.getAttribute("data-speed")) === v); });
     st.setAttribute("data-speed", String(v));
     if (running) { clock = clock + (Date.now() - startAt) * prevSpeed; startAt = Date.now(); progress(clock); }
@@ -249,11 +262,11 @@
 
   // ─── Motyw (zapamiętany w localStorage) ───
   let theme = "dark";
-  function applyTheme(t) {
+  function applyTheme(t, persist) {   // persist === false: bez zapisu (parametr URL)
     theme = t;
     st.classList.toggle("t-dark", t === "dark"); st.classList.toggle("t-light", t === "light");
     refs.logo.src = LOGO[t]; st.setAttribute("data-theme", t);
-    try { localStorage.setItem("kiosk-theme", t); } catch (e) {}
+    if (persist !== false && PERSIST) { try { localStorage.setItem("kiosk-theme", t); } catch (e) {} }
   }
   function initTheme() {
     try { theme = localStorage.getItem("kiosk-theme") === "light" ? "light" : "dark"; } catch (e) {}
@@ -303,11 +316,9 @@
   //     Uruchamiany bez sieci w headless Chrome przez scripts/smoke.sh; błąd skryptu lub scenariusz, który nie dochodzi do fazy 7, oznacza porażkę.
   //     ?tick=timer (bez testu): ticker na setTimeout zamiast rAF, do zrzutów ekranu w headless ───
   function selfTest() {
-    let errors = [], list = [], done = 0, failed = [];
+    let errors = earlyErrors, list = [], done = 0, failed = [];
     PRODUCTS.forEach(function (p, k) { p.scenarios.forEach(function (_, i) { list.push([k, i]); }); });
-    addEventListener("error", function (e) { errors.push(String(e.message || e)); });
-    addEventListener("unhandledrejection", function (e) { errors.push(String(e.reason)); });
-    setSpeed(2); speed = 4; CO.setRobot(true); CO.setCat(true); CO.setHero(true);   // 4×: ~4 s na scenariusz, bez zapisu do localStorage
+    setSpeed(4, false); CO.setRobot(true, false); CO.setCat(true, false); CO.setHero(true, false);   // 4×: ~4 s na scenariusz; nic nie trafia do localStorage
     st.setAttribute("data-test", "running:0/" + list.length);
     function next() {
       if (done >= list.length) {
@@ -329,51 +340,58 @@
   }
 
   // ─── Watchdog: całodzienna praca stoiska. Błąd skryptu przeładowuje stronę; co kilka godzin przeładowanie na granicy scenariusza zwalnia pamięć ───
-  //     Błąd tuż po starcie (np. uszkodzony plik) nie zapętla przeładowań co 5 s: po trzech szybkich próbach odstęp rośnie do minuty.
-  const RELOAD_AFTER_ERROR_MS = 5000, RELOAD_BACKOFF_MS = 60000, RELOAD_QUICK_LIMIT = 3, RELOAD_QUICK_WINDOW_MS = 30000, RELOAD_EVERY_MS = 4 * 3600 * 1000;
-  let reloadDue = false;
+  //     Stan (produkt, scenariusz, obieg) przechodzi przez sessionStorage. Awarie liczone są jako kolejne, gdy błąd przyszedł w ciągu 30 s od startu:
+  //     druga z rzędu wznawia od NASTĘPNEGO scenariusza (zepsuty scenariusz nie blokuje pozostałych), od trzeciej odstęp rośnie do minuty.
+  const RELOAD_AFTER_ERROR_MS = 5000, RELOAD_BACKOFF_MS = 60000, CRASH_SKIP_AFTER = 2, CRASH_BACKOFF_AFTER = 3, CRASH_WINDOW_MS = 30000, RELOAD_EVERY_MS = 4 * 3600 * 1000;
+  let reloadDue = false, resumed = null;   // resumed: stan z sessionStorage po przeładowaniu ({ p, s, pass, crashes }) albo null
+  try { let r = sessionStorage.getItem("kiosk-resume"); if (r) { sessionStorage.removeItem("kiosk-resume"); resumed = JSON.parse(r); } } catch (e) {}
+  function reload(state) { try { sessionStorage.setItem("kiosk-resume", JSON.stringify(state)); } catch (e) {} location.reload(); }
   function watchdog() {
-    let quick = 0;
-    try { quick = parseInt(sessionStorage.getItem("kiosk-reloads") || "0", 10) || 0; sessionStorage.removeItem("kiosk-reloads"); } catch (e) {}
-    let bootAt = Date.now();
-    function reload() {
-      let soon = Date.now() - bootAt < RELOAD_QUICK_WINDOW_MS;
-      try { sessionStorage.setItem("kiosk-resume", pi + "," + si); sessionStorage.setItem("kiosk-reloads", String(soon ? quick + 1 : 0)); } catch (e) {}
-      location.reload();
+    let crashes = (resumed && resumed.crashes) || 0, bootAt = Date.now(), errT = null;
+    function onError() {
+      if (errT || TEST) { return; }
+      let n = Date.now() - bootAt < CRASH_WINDOW_MS ? crashes + 1 : 1;   // liczone w chwili błędu, nie w chwili przeładowania
+      errT = setTimeout(function () { reload({ p: pi, s: si, pass: pass, crashes: n }); }, n > CRASH_BACKOFF_AFTER ? RELOAD_BACKOFF_MS : RELOAD_AFTER_ERROR_MS);
     }
-    let errT = null;
-    function onError() { if (!errT && !TEST) { errT = setTimeout(reload, quick >= RELOAD_QUICK_LIMIT ? RELOAD_BACKOFF_MS : RELOAD_AFTER_ERROR_MS); } }
     addEventListener("error", onError);
     addEventListener("unhandledrejection", onError);
     setTimeout(function () { reloadDue = true; }, RELOAD_EVERY_MS);
   }
 
   // ─── Init ───
-  st = document.getElementById("stage");
-  st.className = "stage t-dark";
-  st.innerHTML = chrome();
-  icons(st);
-  Object.assign(refs, { frame: el("kFrame"), logo: el("kLogo"), rail: el("kRail"), theme: el("kTheme"), pop: el("kPop"), speeds: el("kSpeeds"), robotBtn: el("kRobot"), catBtn: el("kCat"), heroBtn: el("kHero"), setBtn: st.querySelector("[data-act=settings]"), copy: el("kCopy"), name: el("kName"), tag: el("kTag"), phase: el("kPhase"), view: el("kView"), tabs: el("kTabs"), mode: el("kMode"), prog: el("kProg"), progBar: el("kProgBar"), idle: el("kIdle") });
-  Array.prototype.forEach.call(document.querySelectorAll("#robot, #cat, #hero, .robot-wrap"), function (n) { refs.frame.appendChild(n); });   // warstwy postaci wewnątrz kadru: wspólny kontekst z-index z nagłówkiem, stopką i popoverem; overflow kadru je przycina
-  syncFrame(); addEventListener("resize", syncFrame);
-  viewFor = window.KIOSK_VIEWS({ refs: refs, el: el, esc: esc, wait: wait, at: at, icons: icons, setIcon: setIcon, addRows: addRows, setBadge: setBadge });
-  CO = window.KIOSK_COMPANIONS({ st: st, refs: refs, px: px, scale: scale, frameRect: frameRect, frameOrigin: frameOrigin, ticker: ticker, speed: function () { return speed; } });
-  initTheme();
-  listen();
-  setSpeed(SPEEDS.indexOf(speed) >= 0 ? speed : 1);
-  // Parametry URL nadpisują localStorage (profil przeglądarki kiosku bywa czyszczony; skrypt startowy może ustawić wszystko w adresie)
-  function pref(key, fallback) { let v = URLP.get(key); if (v !== null) { return v; } try { return localStorage.getItem("kiosk-" + key) || fallback; } catch (e) { return fallback; } }
-  if (SPEEDS.indexOf(parseFloat(URLP.get("speed"))) >= 0) { setSpeed(parseFloat(URLP.get("speed"))); }
-  if (URLP.get("theme") === "light" || URLP.get("theme") === "dark") { applyTheme(URLP.get("theme")); }
-  CO.setRobot(pref("robot", "1") === "1");
-  CO.setCat(pref("cat", "1") === "1");
-  CO.setHero(pref("hero", "1") === "1");
-  st.setAttribute("data-mode", "loop");
-  watchdog();
-  let startP = parseInt(URLP.get("p") || "0", 10), startS = parseInt(URLP.get("s") || "0", 10) || 0;
-  try { let r = sessionStorage.getItem("kiosk-resume"); if (r) { sessionStorage.removeItem("kiosk-resume"); startP = parseInt(r.split(",")[0], 10); startS = parseInt(r.split(",")[1], 10) || 0; } } catch (e) {}   // po przeładowaniu z błędu: ten sam produkt i scenariusz
-  startP = isNaN(startP) ? 0 : Math.max(0, Math.min(PRODUCTS.length - 1, startP));
-  play(startP, Math.max(0, Math.min(PRODUCTS[startP].scenarios.length - 1, startS)));
-  if (TEST) { selfTest(); }
-  window.KIOSK = { play: play, select: select, selectProduct: selectProduct, act: act, setRobot: CO.setRobot, setCat: CO.setCat, setHero: CO.setHero, heroNow: function (kind) { if (CO.hero()) { CO.hero().launch(kind); } }, heroState: function () { return CO.hero() ? CO.hero().state : null; }, catAgain: function () { if (CO.cat()) { CO.cat().again(); } }, catState: function () { return CO.cat() ? CO.cat().state : null; }, setSpeed: setSpeed, products: PRODUCTS };
+  try {
+    st = document.getElementById("stage");
+    st.className = "stage t-dark";
+    st.innerHTML = chrome();
+    icons(st);
+    Object.assign(refs, { frame: el("kFrame"), logo: el("kLogo"), rail: el("kRail"), theme: el("kTheme"), pop: el("kPop"), speeds: el("kSpeeds"), robotBtn: el("kRobot"), catBtn: el("kCat"), heroBtn: el("kHero"), setBtn: st.querySelector("[data-act=settings]"), copy: el("kCopy"), name: el("kName"), tag: el("kTag"), phase: el("kPhase"), view: el("kView"), tabs: el("kTabs"), mode: el("kMode"), prog: el("kProg"), progBar: el("kProgBar"), idle: el("kIdle") });
+    Array.prototype.forEach.call(document.querySelectorAll("#robot, #cat, #hero, .robot-wrap"), function (n) { refs.frame.appendChild(n); });   // warstwy postaci wewnątrz kadru: wspólny kontekst z-index z nagłówkiem, stopką i popoverem; overflow kadru je przycina
+    syncFrame(); addEventListener("resize", syncFrame);
+    viewFor = window.KIOSK_VIEWS({ refs: refs, el: el, esc: esc, wait: wait, at: at, icons: icons, setIcon: setIcon, addRows: addRows, setBadge: setBadge });
+    CO = window.KIOSK_COMPANIONS({ st: st, refs: refs, px: px, scale: scale, frameRect: frameRect, frameOrigin: frameOrigin, ticker: ticker, speed: function () { return speed; }, persist: PERSIST });
+    initTheme();
+    listen();
+    setSpeed(SPEEDS.indexOf(speed) >= 0 ? speed : 1);
+    // Parametry URL nadpisują localStorage bez zapisu (profil przeglądarki kiosku bywa czyszczony; skrypt startowy może ustawić wszystko w adresie)
+    function pref(key, fallback) { let v = URLP.get(key); if (v !== null) { return v; } try { return localStorage.getItem("kiosk-" + key) || fallback; } catch (e) { return fallback; } }
+    if (SPEEDS.indexOf(parseFloat(URLP.get("speed"))) >= 0) { setSpeed(parseFloat(URLP.get("speed")), false); }
+    if (URLP.get("theme") === "light" || URLP.get("theme") === "dark") { applyTheme(URLP.get("theme"), false); }
+    CO.setRobot(pref("robot", "1") === "1", URLP.get("robot") === null);   // wartość z adresu nie zapisuje się do localStorage
+    CO.setCat(pref("cat", "1") === "1", URLP.get("cat") === null);
+    CO.setHero(pref("hero", "1") === "1", URLP.get("hero") === null);
+    st.setAttribute("data-mode", "loop");
+    watchdog();
+    let startP = parseInt(URLP.get("p") || "0", 10), startS = parseInt(URLP.get("s") || "0", 10) || 0;
+    if (resumed) {   // po przeładowaniu (błąd albo okresowe): to samo miejsce w pętli; po dwóch awariach z rzędu - następny scenariusz
+      startP = parseInt(resumed.p, 10) || 0; startS = parseInt(resumed.s, 10) || 0; pass = parseInt(resumed.pass, 10) || 0;
+      if ((resumed.crashes || 0) >= CRASH_SKIP_AFTER) { startS += 1; if (startS >= (PRODUCTS[startP] || PRODUCTS[0]).scenarios.length) { startS = 0; startP = (startP + 1) % PRODUCTS.length; } }
+    }
+    startP = isNaN(startP) ? 0 : Math.max(0, Math.min(PRODUCTS.length - 1, startP));
+    startS = Math.max(0, Math.min(PRODUCTS[startP].scenarios.length - 1, startS));
+    if (TEST) { selfTest(); } else { play(startP, startS); }   // samotest sam wybiera scenariusze; nasłuchy błędów działają od załadowania skryptu
+    window.KIOSK = { play: play, select: select, selectProduct: selectProduct, act: act, setRobot: CO.setRobot, setCat: CO.setCat, setHero: CO.setHero, heroNow: function (kind) { if (CO.hero()) { CO.hero().launch(kind); } }, heroState: function () { return CO.hero() ? CO.hero().state : null; }, catAgain: function () { if (CO.cat()) { CO.cat().again(); } }, catState: function () { return CO.cat() ? CO.cat().state : null; }, setSpeed: setSpeed, products: PRODUCTS };
+  } catch (e) {   // błąd w Init: samotest dostaje komunikat zamiast "page did not initialise"; poza testem błąd idzie dalej do watchdoga
+    if (TEST) { document.getElementById("stage").setAttribute("data-test", "fail:init " + (e && e.message || e)); }
+    throw e;
+  }
 })();

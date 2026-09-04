@@ -349,7 +349,7 @@ window.Robot = (function () {
     const RB = R.bounds;   // robot size in px, refreshed in place by R.resize(); RB.w = width
     const tempo = typeof opts.speed === 'function' ? opts.speed : () => 1;
 
-    const S = { cards: [], layer: 'front', product: null, remarkIx: 0, gen: null, action: null, bubbleUntil: 0, said: 0, jump: null, t: 0 };
+    const S = { cards: [], layer: 'front', product: null, remarkIx: 0, gen: null, action: null, bubbleUntil: 0, bubbleHalf: 0, said: 0, jump: null, t: 0 };
 
     function scanCards() {
       const list = [], o = origin(), min = 40 * scaleOf();
@@ -371,6 +371,7 @@ window.Robot = (function () {
     function say(text, seconds) {
       if (!bubble || !text) return;
       bubble.textContent = text; bubble.classList.add('on');
+      S.bubbleHalf = bubble.offsetWidth / 2 + 12 * scaleOf();   // measured once per remark, not every frame
       S.bubbleUntil = S.t + seconds;
     }
 
@@ -454,16 +455,14 @@ window.Robot = (function () {
       stage.setAttribute(opts.stateAttr || 'data-robot', a.type + ':' + S.layer + ':' + Math.round(pose.x) + ',' + Math.round(pose.y));
     }
 
-    let scanT = 0;
-    function render(dt) {
-      scanT += dt;
-      if (scanT > 0.15) { scanCards(); scanT = 0; }
+    // cards are rescanned by life() before each move (and by restart() on product change / resize); no per-frame layout reads here
+    function render() {
       R.clear();
-      R.draw(S.layer === 'behind' ? S.cards : null);
-      if (bubble && S.bubbleUntil) { const [hx, hy] = R.headTop(), half = bubble.offsetWidth / 2 + 12, a = area(); bubble.style.left = clamp(hx, a.left + half, a.right - half) + 'px'; bubble.style.top = Math.max(hy, a.top + 40) + 'px'; }
+      R.draw(null);
+      if (bubble && S.bubbleUntil) { const [hx, hy] = R.headTop(), half = S.bubbleHalf || 0, a = area(); bubble.style.left = clamp(hx, a.left + half, a.right - half) + 'px'; bubble.style.top = Math.max(hy, a.top + 40 * scaleOf()) + 'px'; }
     }
 
-    function step(dt) { if (pose.visible) { update(dt); render(dt); } }   // switched off: no card scanning, no drawing
+    function step(dt) { if (pose.visible) { update(dt); render(); } }   // switched off: no card scanning, no drawing
     addEventListener('resize', () => { R.resize(); restart(); });
     restart();
     if (opts.ticker) opts.ticker.add(step);   // shared rAF loop from the host
