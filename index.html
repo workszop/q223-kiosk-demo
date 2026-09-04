@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Quantica Lab · Prezentacja stoiskowa · projekt 01: diagram</title>
+<!--
+  KIOSK (index.html) - cienka powłoka: siedem symulacji w pętli, projekt "flow".
+  Dane: kiosk-data.js · ikony: kiosk-icons.js (lokalnie, bez CDN) · silnik i widoki: kiosk-core.js · robot i kot: robot.js (włączane w ustawieniach) · style: kiosk.css.
+  Parametr ?p=N startuje od produktu N (0-6). Pętla automatyczna: jeden scenariusz z każdej symulacji, w kolejnym obiegu następny scenariusz. Klawisze: 1-3 scenariusz, S ustawienia, Esc zamyka ustawienia, spacja pauza, ←/→ scenariusz, ↑/↓ produkt, R od nowa, F pełny ekran.
+-->
+<link rel="preconnect" href="https://cdn.fontshare.com" crossorigin>
+<link rel="stylesheet" href="theme.css">
+<link rel="stylesheet" href="kiosk.css">
+<style>html, body { margin: 0; background: var(--ink); overflow: hidden; }</style>
+</head>
+<body>
+<main id="stage" class="stage t-dark" aria-label="Symulacje Quantica Lab"></main>
+<canvas id="robot" aria-hidden="true" hidden></canvas>
+<canvas id="cat" aria-hidden="true" hidden></canvas>
+<div class="robot-wrap"><div class="robot-bubble off" id="robotBubble" role="status" aria-live="polite"></div><div class="robot-bubble off" id="catBubble" role="status" aria-live="polite"></div></div>
+<script src="kiosk-icons.js"></script>
+<script src="kiosk-data.js"></script>
+<script src="robot.js"></script>
+<script src="kiosk-core.js"></script>
+</body>
+</html>
