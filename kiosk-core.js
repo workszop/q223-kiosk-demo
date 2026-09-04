@@ -940,14 +940,14 @@
   initTheme();
   listen();
   setSpeed(SPEEDS.indexOf(speed) >= 0 ? speed : 1);
-  let robotPref = "0";
-  try { robotPref = localStorage.getItem("kiosk-robot") || "0"; } catch (e) {}
+  let robotPref = "1";
+  try { robotPref = localStorage.getItem("kiosk-robot") || "1"; } catch (e) {}
   setRobot(robotPref === "1");
-  let catPref = "0";
-  try { catPref = localStorage.getItem("kiosk-cat") || "0"; } catch (e) {}
+  let catPref = "1";
+  try { catPref = localStorage.getItem("kiosk-cat") || "1"; } catch (e) {}
   setCat(catPref === "1");
-  let heroPref = "0";
-  try { heroPref = localStorage.getItem("kiosk-hero") || "0"; } catch (e) {}
+  let heroPref = "1";
+  try { heroPref = localStorage.getItem("kiosk-hero") || "1"; } catch (e) {}
   setHero(heroPref === "1");
   st.setAttribute("data-mode", "loop");
   let startP = parseInt(new URLSearchParams(location.search).get("p") || "0", 10);
