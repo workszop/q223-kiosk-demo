@@ -145,6 +145,8 @@ window.Robot = (function () {
     hang: { armL: -3.0, armR: -3.0, legL: 0.25, legR: -0.25 },   // both arms up, holding the thread
     fly:  { armL: 0.55, armR: 0.55, legL: 0, legR: 0 },           // arms swept back
     land: { armL: -0.9, armR: -0.9, legL: 0, legR: 0 },           // arms forward-down after the impact
+    roar: { armL: -2.6, armR: -2.6, legL: 0.15, legR: -0.15 },   // arms flung up
+    punch: { armL: 0.6, armR: -0.9, legL: 0, legR: 0 },          // right fist forward-down; with a forward lean and the figure sunk to the knees it hits the ground
   };
 
   // ─── Helpers ───
@@ -303,9 +305,16 @@ window.Robot = (function () {
     }
 
     function headTop() { const p = cam(0, MODEL.height + 2 + pose.lift, 0); return [pose.x + p[0] * UNIT, pose.y + p[1] * UNIT]; }
+    // model-space point (voxel units, before yaw/pitch) -> screen CSS px, with the current yaw, pitch and lift applied
+    function project(x, y, z) {
+      const cy = Math.cos(pose.yaw), sy = Math.sin(pose.yaw), cp = Math.cos(pose.pitch), sp2 = Math.sin(pose.pitch), hc = MODEL.height * 0.5;
+      const y1 = (y - hc) * cp - z * sp2, z1 = (y - hc) * sp2 + z * cp;
+      const p = cam(x * cy + z1 * sy, y1 + hc + pose.lift, -x * sy + z1 * cy);
+      return [pose.x + p[0] * UNIT, pose.y + p[1] * UNIT];
+    }
 
     resize();
-    return { pose, bounds, unit: UNIT, model: opts.model || 'bot', ctx, height: MODEL.height, resize, clear, animate, draw, headTop, WALK_YAW: MODEL.walkYaw || WALK_YAW, CAM_YAW };
+    return { pose, bounds, unit: UNIT, model: opts.model || 'bot', ctx, height: MODEL.height, resize, clear, animate, draw, headTop, project, WALK_YAW: MODEL.walkYaw || WALK_YAW, CAM_YAW };
   }
 
   // ─── Kiosk director: strolls in front of the stage cards ───

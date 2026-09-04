@@ -62,8 +62,8 @@
   --robot-black: #15181F;
   --robot-white: #F7F7F5;
   --hero-thread: rgba(247,247,245,0.75);
-  --hero-thrust: rgba(255,190,80,0.85);
   --hero-dust: rgba(160,150,140,0.55);
+  --hero-crack: rgba(20,24,31,0.85);
   --robot-bubble-bg: #FDFCFB;
   --robot-bubble-fg: #0A1F2C;
 }
@@ -991,6 +991,8 @@ button { font: inherit; }
 .robot-wrap.cat-wrap { z-index: 8; }
 #hero { position: fixed; inset: 0; width: 100vw; height: 100vh; z-index: 9; pointer-events: none; image-rendering: auto; }   /* bohaterowie (easter eggi) nad wszystkim poza popoverem */
 #hero[hidden] { display: none; }
+.robot-wrap.hero-wrap { z-index: 10; }
+.robot-bubble.roar { font-size: 1.5cqw; font-weight: 700; letter-spacing: 0.06em; }
 #cat[hidden] { display: none; }
 
 /* ─── Motyw jasny: ciemniejsze obrysy i tła ─── */

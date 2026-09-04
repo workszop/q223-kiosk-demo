@@ -706,12 +706,12 @@
   }
 
   // ─── Bohaterowie (easter eggi, robot.js modele spider/iron/hulk): co drugi scenariusz jeden z trzech przelatuje przez ekran ───
-  //     spider: zjeżdża na nici z góry, huśta się po łuku przez ekran i odlatuje; iron: przelatuje poziomo z dopalaczami;
-  //     hulk: spada z góry na dół sceny, wstrząs i kurz, po chwili wyskakuje w górę
+  //     spider: zjeżdża na nici z góry, huśta się po łuku przez ekran i odlatuje; iron: wzlatuje po skosie od dołu, twarzą do widza;
+  //     hulk: spada z góry na dół sceny (wstrząs, kurz), ryczy z rękami w górze, wali pięścią w ziemię (drugi wstrząs, pęknięcia), wyskakuje w górę
   const HERO_KINDS = ["spider", "iron", "hulk"], HERO_EVERY = 2;
   let hero = null, heroOn = false, heroPlays = 0, heroIx = Math.floor(Math.random() * HERO_KINDS.length);
-  function makeHero(canvas) {
-    let R = {}, H = { active: false, kind: null, phase: "idle", t: 0, launchAt: 0, pending: null, dust: [], trail: [] };
+  function makeHero(canvas, bubble) {
+    let R = {}, H = { active: false, kind: null, phase: "idle", t: 0, launchAt: 0, pending: null, dust: [], cracks: [], bubbleUntil: 0 };
     let ctx = null;
     function renderer(kind) {
       if (!R[kind]) { R[kind] = window.Robot.create({ canvas: canvas, model: kind, smooth: true, unit: kind === "hulk" ? 12 : 9 }); R[kind].pose.shadow = false; }
@@ -722,17 +722,17 @@
     function launch(kind) {
       let r = renderer(kind), p = r.pose, W = innerWidth, Hh = innerHeight;
       r.resize();   // płótno mogło być ukryte (0×0) przy tworzeniu renderera lub zmianie rozmiaru
-      H.kind = kind; H.active = true; H.t = 0; H.dust = []; H.trail = []; H.phase = "in"; H.pose = p;
+      H.kind = kind; H.active = true; H.t = 0; H.dust = []; H.cracks = []; H.phase = "in"; H.pose = p; hideBubble();
       p.lift = 0; p.pitch = 0; p.yaw = 0; p.poseA = 0; p.airborne = false; p.visible = true;
       if (kind === "spider") {
         H.dir = Math.random() < 0.5 ? 1 : -1;
         H.x0 = H.dir > 0 ? W * 0.12 : W * 0.88; H.y0 = Hh * 0.42;
         H.anchor = [H.dir > 0 ? W * 0.55 : W * 0.45, -12];
         p.x = H.x0; p.y = -r.height * r.unit - 20;
-      } else if (kind === "iron") {
+      } else if (kind === "iron") {                                              // from a bottom corner up to the opposite top corner
         H.dir = Math.random() < 0.5 ? 1 : -1;
-        H.y0 = Hh * (0.3 + Math.random() * 0.25);
-        p.x = H.dir > 0 ? -140 : W + 140; p.y = H.y0;
+        p.x = H.dir > 0 ? W * 0.12 : W * 0.88; p.y = Hh + 160;
+        H.vx = H.dir * (W * 0.7) / 2.4; H.vy = -(Hh + 420) / 2.4;
       } else {
         p.x = W * (0.2 + Math.random() * 0.6); p.y = -r.height * r.unit - 40;
         H.vy = 0; H.ground = Hh - 18;
@@ -766,11 +766,9 @@
           if (p.x < -200 || p.x > W + 200 || p.y > Hh + 200) { H.active = false; }
         }
       } else if (k === "iron") {
-        input.pose = "fly"; input.yawTarget = H.dir * r.WALK_YAW - r.CAM_YAW; p.pitch = 1.25;
-        p.x += H.dir * 820 * ds; p.y = H.y0 + Math.sin(H.t * 2.2) * 14;
-        H.trail.push({ x: p.x, y: p.y, a: 1 }); if (H.trail.length > 18) { H.trail.shift(); }
-        H.trail.forEach(function (q) { q.a -= ds * 2.2; });
-        if (p.x < -200 || p.x > W + 200) { H.active = false; }
+        input.pose = "fly"; input.yawTarget = 0; p.pitch = -0.3;                 // facing the viewer, leaning back a little as he climbs
+        p.x += H.vx * ds; p.y += H.vy * ds;
+        if (p.y < -r.height * r.unit - 80) { H.active = false; }
       } else {                                                                        // hulk
         if (H.phase === "in") {
           input.airborne = true; H.vy += 2600 * ds; p.y += H.vy * ds; input.yawTarget = 0;
@@ -778,20 +776,44 @@
             p.y = H.ground; H.phase = "land"; H.pt = 0; shake(0.55);
             for (let i = 0; i < 14; i++) { H.dust.push({ x: p.x + (Math.random() - 0.5) * 60, y: p.y, vx: (Math.random() - 0.5) * 260, vy: -Math.random() * 160, r: 8 + Math.random() * 14, a: 1 }); }
           }
-        } else if (H.phase === "land") {
-          input.pose = "land"; input.yawTarget = 0; H.pt += ds;
-          if (H.pt > 1.6) { H.phase = "out"; H.vy = -2600; H.vx = (Math.random() - 0.5) * 300; }
+        } else if (H.phase === "land") {                                          // crouched after the impact
+          input.pose = "land"; input.yawTarget = 0; H.pt += ds; ease(p, 0, 0, ds);
+          if (H.pt > 0.4) { H.phase = "roar"; H.pt = 0; say("RAAARGH!", 1.2); }
+        } else if (H.phase === "roar") {                                          // arms up, leaning back
+          input.pose = "roar"; input.yawTarget = 0; H.pt += ds; ease(p, -0.25, 0, ds);
+          if (H.pt > 1.1) { H.phase = "punch"; H.pt = 0; H.hit = false; }
+        } else if (H.phase === "punch") {                                         // drops into a crouch and slams the right fist into the ground
+          input.pose = "punch"; input.yawTarget = 0; H.pt += ds; ease(p, 0.5, -5, ds);
+          if (!H.hit && H.pt > 0.22) {
+            H.hit = true; shake(0.45);
+            let f = r.project(4, 6.7, 3.5);   // the right fist (arm swung forward-down) in screen px
+            for (let i = 0; i < 12; i++) { H.dust.push({ x: f[0] + (Math.random() - 0.5) * 30, y: f[1], vx: (Math.random() - 0.5) * 300, vy: -Math.random() * 200, r: 6 + Math.random() * 12, a: 1 }); }
+            for (let i = 0; i < 7; i++) {
+              let ang = Math.PI * (0.05 + Math.random() * 0.9) * (Math.random() < 0.5 ? 1 : -1), len = 50 + Math.random() * 90, pts = [[f[0], f[1]]], x = f[0], y = f[1];
+              for (let s = 1; s <= 3; s++) { x += Math.cos(ang) * len / 3; y += Math.sin(ang) * len / 3 * 0.35; ang += (Math.random() - 0.5) * 0.9; pts.push([x, y]); }
+              H.cracks.push({ pts: pts, a: 1 });
+            }
+          }
+          if (H.pt > 0.9) { H.phase = "stand"; H.pt = 0; }
+        } else if (H.phase === "stand") {                                         // back up, then leap out
+          input.pose = "land"; input.yawTarget = 0; H.pt += ds; ease(p, 0, 0, ds);
+          if (H.pt > 0.6) { H.phase = "out"; H.vy = -2600; H.vx = (Math.random() - 0.5) * 300; }
         } else {
-          input.airborne = true; H.vy += 1400 * ds; p.y += H.vy * ds; p.x += H.vx * ds; input.yawTarget = 0;
+          input.airborne = true; H.vy += 1400 * ds; p.y += H.vy * ds; p.x += H.vx * ds; input.yawTarget = 0; ease(p, 0, 0, ds);
           if (p.y < -r.height * r.unit - 60 || p.y > Hh + 300) { H.active = false; }
         }
+        H.cracks.forEach(function (c) { c.a -= ds * 0.6; }); H.cracks = H.cracks.filter(function (c) { return c.a > 0; });
         H.dust.forEach(function (d) { d.x += d.vx * ds; d.y += d.vy * ds; d.vy += 120 * ds; d.r += 30 * ds; d.a -= ds * 1.3; });
         H.dust = H.dust.filter(function (d) { return d.a > 0; });
       }
       r.animate(dt, input);
+      if (H.bubbleUntil && (H.t > H.bubbleUntil || !H.active)) { hideBubble(); }
       H.phase = H.active ? H.phase : "idle";
       st.setAttribute("data-hero", H.active ? k + ":" + H.phase + ":" + Math.round(p.x) + "," + Math.round(p.y) : "idle");
     }
+    function ease(p, pitch, lift, ds) { let k = Math.min(1, 14 * ds); p.pitch += (pitch - p.pitch) * k; p.lift += (lift - p.lift) * k; }
+    function say(text, sec) { bubble.textContent = text; bubble.classList.add("on"); H.bubbleUntil = H.t + sec; }
+    function hideBubble() { bubble.classList.remove("on"); H.bubbleUntil = 0; }
     function shake(sec) {
       let t0 = performance.now(), amp = 9;
       (function step(now) {
@@ -811,9 +833,9 @@
         ctx.save(); ctx.strokeStyle = color("--hero-thread"); ctx.lineWidth = 1.5; ctx.beginPath();
         ctx.moveTo(H.phase === "swing" ? H.anchor[0] : p.x, H.phase === "swing" ? H.anchor[1] : -12); ctx.lineTo(h[0], h[1] - 8); ctx.stroke(); ctx.restore();
       }
-      if (H.kind === "iron") {                                                        // thruster trail behind the feet
-        ctx.save();
-        H.trail.forEach(function (q, i) { if (q.a <= 0) { return; } ctx.globalAlpha = q.a * 0.6; ctx.fillStyle = color("--hero-thrust"); ctx.beginPath(); ctx.arc(q.x - H.dir * 26, q.y - 6, 4 + (H.trail.length - i) * 0.9, 0, Math.PI * 2); ctx.fill(); });
+      if (H.kind === "hulk" && H.cracks.length) {                                 // cracks radiating from the fist
+        ctx.save(); ctx.strokeStyle = color("--hero-crack"); ctx.lineCap = "round";
+        H.cracks.forEach(function (c) { ctx.globalAlpha = Math.max(0, c.a); ctx.lineWidth = 2.5; ctx.beginPath(); c.pts.forEach(function (q, i) { i ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1]); }); ctx.stroke(); });
         ctx.restore();
       }
       if (H.kind === "hulk" && H.dust.length) {
@@ -822,6 +844,7 @@
         ctx.restore();
       }
       r.draw(null);
+      if (H.bubbleUntil) { let h = r.headTop(); bubble.style.left = Math.min(Math.max(h[0], 120), innerWidth - 120) + "px"; bubble.style.top = Math.max(h[1] - 10, 40) + "px"; }
     }
     let last = performance.now();
     function frame(now) { let dt = Math.min(0.05, (now - last) / 1000); last = now; if (heroOn) { update(dt); render(); } requestAnimationFrame(frame); }
@@ -831,10 +854,10 @@
   }
   function setHero(on) {
     heroOn = !!on;
-    let canvas = document.getElementById("hero");
-    companionToggle("hero", refs.heroBtn, canvas, null, heroOn);
-    if (heroOn && !hero && window.Robot && canvas) { hero = makeHero(canvas); }
-    if (hero && !heroOn) { hero.state.active = false; hero.state.launchAt = 0; refs.view.style.transform = ""; }
+    let canvas = document.getElementById("hero"), bubble = document.getElementById("heroBubble");
+    companionToggle("hero", refs.heroBtn, canvas, bubble, heroOn);
+    if (heroOn && !hero && window.Robot && canvas) { hero = makeHero(canvas, bubble); }
+    if (hero && !heroOn) { hero.state.active = false; hero.state.launchAt = 0; hero.state.bubbleUntil = 0; bubble.classList.remove("on"); refs.view.style.transform = ""; }
   }
   // wywoływane z play(): co drugi scenariusz planuje jednego bohatera (po kolei), kilka sekund po starcie
   function heroTick() {
