@@ -102,17 +102,19 @@ window.Robot = (function () {
     const armL = part(9.5, 0, 'armL'), armR = part(9.5, 0, 'armR');
     const legL = part(5, 0, 'legL'), legR = part(5, 0, 'legR');
     if (kind === 'spider') {
-      box(head, -2, 2, 10, 14, -2, 2, 'red');
-      set(head, 0, 14, 0, 'black'); set(head, 0, 13, 2, 'black'); set(head, 0, 10, 2, 'black'); set(head, -2, 12, 0, 'black'); set(head, 2, 12, 0, 'black');   // web lines
-      box(head, -1, -1, 11, 12, 2, 2, 'white'); box(head, 1, 1, 11, 12, 2, 2, 'white');                                                                 // big eyes
+      box(head, -2, 2, 11, 15, -2, 2, 'red');
+      box(head, -1, 1, 10, 10, -1, 1, 'black');                                                                                                         // neck, separates the head from the torso
+      set(head, 0, 15, 0, 'black'); set(head, 0, 14, 2, 'black'); set(head, 0, 11, 2, 'black'); set(head, -2, 13, 0, 'black'); set(head, 2, 13, 0, 'black');   // web lines
+      box(head, -1, -1, 12, 13, 2, 2, 'white'); box(head, 1, 1, 12, 13, 2, 2, 'white');                                                                 // big eyes
       box(body, -2, 2, 5, 9, -1, 1, 'red');
-      box(body, -2, 2, 5, 6, -1, 1, 'blue');
+      box(body, -2, -2, 5, 9, -1, 1, 'blue'); box(body, 2, 2, 5, 9, -1, 1, 'blue');                                                                     // blue side panels
+      box(body, -2, 2, 5, 5, -1, 1, 'blue');
       set(body, 0, 8, 1, 'black'); set(body, 0, 7, 1, 'black'); set(body, -1, 8, 1, 'black'); set(body, 1, 8, 1, 'black');                              // spider emblem
       box(armL, -4, -3, 5, 9, -1, 0, 'blue'); box(armL, -4, -3, 5, 6, -1, 0, 'red');
       box(armR, 3, 4, 5, 9, -1, 0, 'blue');   box(armR, 3, 4, 5, 6, -1, 0, 'red');
       box(legL, -2, -1, 1, 4, -1, 0, 'blue'); box(legL, -2, -1, 0, 1, -1, 1, 'red');
       box(legR, 1, 2, 1, 4, -1, 0, 'blue');   box(legR, 1, 2, 0, 1, -1, 1, 'red');
-      return { parts: { body, head, legL, legR, armL, armR }, height: 17, shadow: 5.5, walkYaw: 0.8 };
+      return { parts: { body, head, legL, legR, armL, armR }, height: 18, shadow: 5.5, walkYaw: 0.8 };
     }
     if (kind === 'iron') {
       box(head, -2, 2, 10, 14, -2, 2, 'red');
