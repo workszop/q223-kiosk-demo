@@ -1,6 +1,6 @@
 /*
   Quantica Lab - fonty (wszystkie strony).
-  Satoshi 400/500/700 z cdn.fontshare.com, Geist Mono 400/500/600 z fonts.gstatic.com.
+  Satoshi 400/500/700 + Italic (zmienny) z cdn.fontshare.com, Geist Mono 400/500/600 z fonts.gstatic.com.
   Kolejnosc arkuszy w <head>: theme.css -> site.css -> (strony produktowe) sim.css
 */
 
@@ -24,6 +24,15 @@
   font-weight: 700;
   font-display: swap;
   src: url('https://cdn.fontshare.com/wf/LAFFD4SDUCDVQEXFPDC7C53EQ4ZELWQI/PXCT3G6LO6ICM5I3NTYENYPWJAECAWDD/GHM6WVH6MILNYOOCXHXB5GTSGNTMGXZR.woff2') format('woff2');
+}
+
+/* Satoshi Italic: font zmienny (300-900), uzywany w symulacjach dokumentow (kiosk.css) */
+@font-face {
+  font-family: 'Satoshi';
+  font-style: italic;
+  font-weight: 300 900;
+  font-display: swap;
+  src: url('https://cdn.fontshare.com/wf/3JZIFUW7KLFSPLVCIUI2DLGNIER6IFCX/MMP4RUF5LYGUAZS3DCJC3GJ6F6SAGKSN/E3NEPGEAHYCHR37DSBXHV33XCYYRE2CY.woff2') format('woff2');
 }
 
 /* Geist Mono: font zmienny (jeden plik obsluguje wagi 400-600), latin-ext + latin */
