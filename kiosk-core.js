@@ -1,5 +1,6 @@
-/* KIOSK CORE - silnik pętli (zegar scenariusza, tryb auto/ręczny/pauza), chrome sceny, widoki produktowe, postaci (robot, kot, bohaterowie), ustawienia, motyw, watchdog.
-   Cienka powłoka index.html ładuje kiosk-icons.js, kiosk-data.js, robot.js i ten plik.
+/* KIOSK CORE - silnik pętli (zegar scenariusza, tryb auto/ręczny/pauza), chrome sceny, ustawienia, motyw, samotest, watchdog.
+   Widoki produktowe: kiosk-views.js (KIOSK_VIEWS), postaci: kiosk-companions.js (KIOSK_COMPANIONS) - oba dostają z tego pliku obiekt K z pomocnikami.
+   Cienka powłoka index.html ładuje kiosk-icons.js, kiosk-data.js, robot.js, kiosk-views.js, kiosk-companions.js i ten plik.
    Parametry URL: ?p=N produkt (0-6), ?s=N scenariusz (0-2), ?speed=0.5|0.75|1|1.5|2, ?robot=0|1, ?cat=0|1, ?hero=0|1, ?theme=dark|light (nadpisują localStorage). */
 (function () {
   "use strict";
@@ -11,7 +12,7 @@
   const FRAME_REF_W = 1920;   // szerokość kadru, przy której postaci mają skalę 1
   const LOGO = { dark: "quantica-logo-white.png", light: "quantica-logo-color.png" };
   const PRODUCTS = window.KIOSK_PRODUCTS;
-  const URLP = new URLSearchParams(location.search);
+  const URLP = new URLSearchParams(location.search), TEST = URLP.get("test") === "1";   // ?test=1: samotest (patrz selfTest)
   const SVG = {
     prev: "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"m15 18-6-6 6-6\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></svg>",
     next: "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"m9 18 6-6-6-6\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></svg>",
@@ -35,7 +36,7 @@
   // Jeden ticker rAF dla zegara scenariusza i wszystkich postaci (robot, kot, bohaterowie); dt w sekundach, ograniczone do 50 ms
   const ticker = (function () {
     let fns = [], last = performance.now();
-    const raf = URLP.get("tick") === "timer" ? function (fn) { setTimeout(function () { fn(performance.now()); }, 16); } : requestAnimationFrame;   // ?tick=timer: headless/ukryta karta, gdzie rAF nie tyka
+    const raf = (TEST || URLP.get("tick") === "timer") ? function (fn) { setTimeout(function () { fn(performance.now()); }, TEST ? 50 : 16); } : requestAnimationFrame;   // headless/ukryta karta: rAF nie tyka, timer tak (test: 20 kl/s, mniej rysowania)
     function frame(t) { let dt = Math.min(0.05, (t - last) / 1000); last = t; for (let i = 0; i < fns.length; i += 1) { fns[i](dt); } raf(frame); }
     raf(frame);
     return { add: function (fn) { fns.push(fn); } };
@@ -57,7 +58,8 @@
   function stopClock() { clock = now(); running = false; }
 
   // ─── DOM refs (po renderze chrome) ───
-  let refs = {};
+  const refs = {};   // wypełniane w Init (Object.assign), ten sam obiekt trafia do widoków i postaci
+  let viewFor = null, CO = null;   // fabryka widoków (kiosk-views.js) i postaci (kiosk-companions.js), tworzone w Init
 
   // ─── Helpers ───
   function el(id) { return document.getElementById(id); }
@@ -75,12 +77,6 @@
   function px(v) { return v * scale(); }
   function syncFrame() { frameCache = measureFrame(); }
   function q(sel) { return st.querySelector(sel); }
-  // Dymek nad głową postaci (układ kadru): wyśrodkowany nad punktem head, cały w kadrze, nie wyżej niż px(40) od góry
-  function placeBubble(bubble, head, dy) {
-    let fr = frameRect(), half = bubble.offsetWidth / 2 + px(12);
-    bubble.style.left = Math.min(Math.max(head[0], half), fr.width - half) + "px";
-    bubble.style.top = Math.max(head[1] + dy, px(40)) + "px";
-  }
   // Ikony z kiosk-icons.js (osadzone lokalnie): <i data-lucide="x" class="icon"> -> <svg class="icon">; tylko w podanym poddrzewie
   function icons(root) {
     Array.prototype.forEach.call((root || st).querySelectorAll("i[data-lucide]"), function (i) {
@@ -149,321 +145,6 @@
     Array.prototype.forEach.call(refs.tabs.children, function (t) { t.addEventListener("click", function () { select(parseInt(t.getAttribute("data-scn"), 10)); }); });
   }
 
-  // ─── Render: widok domyślny (diagram pytanie → proces → wynik; Zagłoba) ───
-  function flowView(p) {
-    refs.view.innerHTML = "<div class=\"fl-wrap\"><div class=\"fl\">" +
-      "<div class=\"fl-node\" id=\"fQ\"><span class=\"fl-no\">01</span><h3><i data-lucide=\"" + p.nodes.input.icon + "\" class=\"icon\"></i>" + esc(p.nodes.input.title) + "</h3><p class=\"fl-q\" id=\"fQT\"></p></div>" +
-      "<div class=\"fl-link\" id=\"fL1\"><i></i></div>" +
-      "<div class=\"fl-node\" id=\"fS\"><span class=\"fl-no\">02</span><h3><i data-lucide=\"" + p.nodes.process.icon + "\" class=\"icon\"></i>" + esc(p.nodes.process.title) + "</h3><ul class=\"fl-checks\">" +
-      p.nodes.process.icons.map(function (ic, k) { return "<li id=\"fC" + k + "\"><i data-lucide=\"" + ic + "\" class=\"icon\"></i><span></span></li>"; }).join("") + "</ul></div>" +
-      "<div class=\"fl-link\" id=\"fL2\"><i></i></div>" +
-      "<div class=\"fl-node\" id=\"fR\"><span class=\"fl-no\">03</span><h3><i data-lucide=\"file-check\" class=\"icon\"></i><span id=\"fRT\"></span></h3>" +
-      "<p class=\"fl-prev\" id=\"fRP\"></p><div class=\"fl-cites\" id=\"fRC\"></div><div class=\"badge\" id=\"fRB\"><i data-lucide=\"quote\" class=\"icon\"></i><span></span></div></div>" +
-      "</div></div>";
-    let r = { q: el("fQ"), qt: el("fQT"), l1: el("fL1"), s: el("fS"), c: [el("fC0"), el("fC1"), el("fC2")], l2: el("fL2"), n: el("fR"), rt: el("fRT"), rp: el("fRP"), rc: el("fRC"), rb: el("fRB") };
-    return {
-      reset: function (s) {
-        let out = p.outputs[s.target];
-        [r.q, r.s, r.n].forEach(function (x) { x.className = "fl-node"; });
-        [r.l1, r.l2].forEach(function (x) { x.className = "fl-link"; });
-        r.c.forEach(function (x, k) { x.classList.remove("on"); x.lastChild.textContent = s.checks[k]; });
-        r.qt.textContent = s.input;
-        r.n.setAttribute("data-target", out.tone === "teal" ? "nodata" : s.target);
-        r.rt.textContent = out.title; setIcon(r.n.querySelector("h3"), out.icon);
-        r.rp.className = "fl-prev"; r.rp.innerHTML = ""; r.rc.innerHTML = ""; r.rb.className = "badge";
-      },
-      step: function (n, s) {
-        if (n === 0) { r.q.classList.add("on"); }
-        if (n === 1) { r.q.className = "fl-node done"; r.l1.classList.add("on"); r.s.classList.add("on"); }
-        if (n >= 2 && n <= 4) { r.c[n - 2].classList.add("on"); }
-        if (n === 5) { r.s.className = "fl-node done"; r.l1.className = "fl-link done"; r.l2.classList.add("on"); r.n.classList.add("on"); r.rp.innerHTML = s.preview; r.rp.classList.add("show"); }
-        if (n === 6) { addRows(r.rc, s.rows, 250); setBadge(r.rb, s, p); }
-      }
-    };
-  }
-
-  // ─── Widoki produktowe: każdy produkt ma własny kształt sceny ───
-  function card(cls, id, icon, title, sub, extra) {
-    return "<div class=\"card " + cls + "\" id=\"" + id + "\"><h3><i data-lucide=\"" + icon + "\" class=\"icon\"></i><span>" + esc(title) + "</span></h3>" + (sub ? "<div class=\"sub\">" + esc(sub) + "</div>" : "") + (extra || "") + "</div>";
-  }
-  function checksList(prefix, icns) {
-    return "<ul class=\"fl-checks\">" + icns.map(function (ic, k) { return "<li id=\"" + prefix + k + "\"><i data-lucide=\"" + ic + "\" class=\"icon\"></i><span></span></li>"; }).join("") + "</ul>";
-  }
-
-  // Klara: zapytanie -> router z pokrętłem -> trzy trasy
-  function klaraView(p) {
-    let outs = p.viz.outcomes;
-    refs.view.innerHTML = "<div class=\"kv kv-klara\">" +
-      card("", "kQ", p.nodes.input.icon, p.nodes.input.title, "", "<p class=\"fl-q\" id=\"kQT\"></p>") +
-      "<div class=\"fl-link\" id=\"kL1\"><i></i></div>" +
-      card("kr-router", "kR", "route", "Router", "gdzie trafi zadanie", checksList("kC", p.nodes.process.icons)) +
-      "<div class=\"kr-gap\"></div>" +
-      "<div class=\"kr-outs\">" + outs.map(function (o, k) { return card("kr-out", "kO" + k, o.icon, o.title, o.sub, "<div class=\"kr-tag\" id=\"kT" + k + "\"></div><p class=\"prev\" id=\"kP" + k + "\"></p><div class=\"rows\" id=\"kRw" + k + "\"></div><div class=\"badge\" id=\"kB" + k + "\"><i data-lucide=\"quote\" class=\"icon\"></i><span></span></div>"); }).join("") + "</div>" +
-      "</div>";
-    let r = { q: el("kQ"), qt: el("kQT"), l1: el("kL1"), router: el("kR"), c: [el("kC0"), el("kC1"), el("kC2")] };
-    let cards = outs.map(function (_, k) { return el("kO" + k); });
-    function chosen(s) { return outs.map(function (o) { return o.key; }).indexOf(Object.keys(s.route).filter(function (k) { return s.route[k] === "on"; })[0]); }
-    return {
-      reset: function (s) {
-        r.q.className = "card"; r.qt.textContent = s.input; r.l1.className = "fl-link"; r.router.className = "card kr-router";
-        r.c.forEach(function (x, k) { x.classList.remove("on"); x.removeAttribute("data-route"); x.lastChild.textContent = s.checks[k]; });
-        outs.forEach(function (o, k) { cards[k].className = "card kr-out"; el("kT" + k).textContent = ""; el("kP" + k).className = "prev"; el("kP" + k).innerHTML = ""; el("kRw" + k).innerHTML = ""; el("kB" + k).className = "badge"; setIcon(cards[k].querySelector("h3"), o.icon); });
-      },
-      step: function (n, s) {
-        if (n === 0) { r.q.classList.add("on"); }
-        if (n === 1) { r.q.className = "card done"; r.l1.classList.add("on"); r.router.classList.add("on"); }
-        if (n >= 2 && n <= 4) { r.c[n - 2].classList.add("on"); r.c[n - 2].setAttribute("data-route", s.checkRoutes[n - 2]); }
-        if (n === 5) {
-          let ch = chosen(s);
-          outs.forEach(function (o, k) {
-            let state = s.route[o.key];
-            cards[k].className = "card kr-out " + state; cards[k].setAttribute("data-route", o.key === "local" ? "local" : "external");
-            el("kT" + k).textContent = state === "on" ? "wybrana trasa" : state === "alt" ? "alternatywa" : state === "locked" ? "zablokowany · dane poufne" : "";
-            if (state === "locked") { setIcon(cards[k].querySelector("h3"), "lock"); }
-          });
-          el("kP" + ch).innerHTML = s.preview; el("kP" + ch).classList.add("show");
-        }
-        if (n === 6) { let c = chosen(s); addRows(el("kRw" + c), s.rows, 250); setBadge(el("kB" + c), s, p); }
-      }
-    };
-  }
-
-  // Kmicic: wiadomość e-mail -> analiza w centrum -> trzy tory obsługi (jeden rośnie)
-  function kmicicView(p) {
-    let lanes = p.viz.lanes;
-    refs.view.innerHTML = "<div class=\"kv kv-kmicic\">" +
-      "<div class=\"km-col\"><small class=\"kv-k\">skrzynka odbiorcza</small><div class=\"card km-mail\" id=\"mM\">" +
-      "<div class=\"km-hdr\"><div class=\"km-h\"><b>Od</b><span id=\"mFrom\"></span></div><div class=\"km-h\"><b>Do</b><span>kancelaria organizacji</span></div><div class=\"km-h\"><b>Temat</b><span id=\"mSubj\"></span></div></div>" +
-      "<div class=\"km-body\" id=\"mS\"></div><div class=\"km-sign\" id=\"mSign\"></div><div class=\"km-att\" id=\"mAtt\"><i data-lucide=\"paperclip\" class=\"icon\"></i><span></span></div></div></div>" +
-      "<div class=\"km-col km-center\"><small class=\"kv-k\">analiza wiadomości</small><div class=\"card km-analysis\" id=\"mAn\"><h3><i data-lucide=\"scan-search\" class=\"icon\"></i><span>Klasyfikacja</span></h3><div class=\"km-strip\" id=\"mStrip\"></div></div></div>" +
-      "<div class=\"km-col\"><small class=\"kv-k\">tor obsługi</small><div class=\"km-lanes\">" + lanes.map(function (l, k) { return "<div class=\"card km-lane\" id=\"mL" + k + "\"><div class=\"km-lane-h\"><i data-lucide=\"" + l.icon + "\" class=\"icon\"></i>" + esc(l.title) + "</div><div class=\"sub\">" + esc(l.sub) + "</div><p class=\"prev\" id=\"mP" + k + "\"></p><div class=\"rows\" id=\"mR" + k + "\"></div><div class=\"km-stamp\" id=\"mSt" + k + "\"><i data-lucide=\"stamp\" class=\"icon\"></i><span></span></div></div>"; }).join("") + "</div></div>" +
-      "</div>";
-    let mail = el("mM"), from = el("mFrom"), subj = el("mSubj"), body = el("mS"), sign = el("mSign"), att = el("mAtt"), strip = el("mStrip"), an = el("mAn");
-    function laneIx(s) { return lanes.map(function (l) { return l.key; }).indexOf(s.target); }
-    return {
-      reset: function (s) {
-        mail.className = "card km-mail"; from.textContent = s.sender; subj.textContent = s.subject;
-        body.innerHTML = (s.mailBody || [s.input]).map(function (para) { return "<p>" + esc(para) + "</p>"; }).join("");
-        sign.innerHTML = (s.sign || []).map(function (line, k) { return "<span" + (k === 1 ? " class=\"km-name\"" : "") + ">" + esc(line) + "</span>"; }).join("");
-        att.lastChild.textContent = s.attach; att.className = "km-att" + (s.attach ? "" : " hide");
-        an.className = "card km-analysis";
-        strip.innerHTML = s.chips.map(function (c) { return "<div class=\"km-chip\"><b>" + esc(c[0]) + "</b><span>" + esc(c[1]) + "</span></div>"; }).join("");
-        lanes.forEach(function (_, k) { el("mL" + k).className = "card km-lane"; el("mP" + k).className = "prev"; el("mP" + k).innerHTML = ""; el("mR" + k).innerHTML = ""; el("mSt" + k).className = "km-stamp"; });
-      },
-      step: function (n, s) {
-        let chips = strip.children;
-        if (n === 0) { mail.classList.add("on"); }
-        if (n === 1) { an.classList.add("on"); }
-        if (n === 2) { chips[0].classList.add("show"); chips[1].classList.add("show"); }
-        if (n === 3) { chips[2].classList.add("show"); chips[1].classList.add("hot"); }
-        if (n === 4) { chips[3].classList.add("show"); chips[3].classList.add("hot"); }
-        if (n === 5) {
-          let t = laneIx(s);
-          mail.className = "card km-mail done"; an.className = "card km-analysis done";
-          lanes.forEach(function (_, k) { el("mL" + k).className = "card km-lane " + (k === t ? "on" : "off"); });
-          el("mP" + t).innerHTML = s.preview; el("mP" + t).classList.add("show");
-        }
-        if (n === 6) {
-          let t2 = laneIx(s), st2 = el("mSt" + t2);
-          addRows(el("mR" + t2), s.rows, 250);
-          st2.lastChild.textContent = s.badge; st2.className = "km-stamp show";
-          if (s.approved) { at(3000, function () { st2.lastChild.textContent = s.approved; st2.className = "km-stamp show ok"; refs.phase.textContent = "pracownik zatwierdził odpowiedź po drobnej korekcie - wiadomość wysłana"; }); }
-        }
-      }
-    };
-  }
-
-  // Dyndalski: formularz -> szyna kontroli -> arkusz dokumentu
-  function dyndalskiView(p) {
-    refs.view.innerHTML = "<div class=\"kv kv-dyndalski\">" +
-      "<div><small class=\"kv-k\">formularz</small><div class=\"card dy-form\" id=\"yF\"><div id=\"yFields\"></div><div class=\"dy-suggest\" id=\"ySug\"></div></div></div>" +
-      "<ul class=\"dy-rail\">" + p.nodes.process.icons.map(function (ic, k) { return "<li id=\"yR" + k + "\"><i data-lucide=\"" + ic + "\" class=\"icon\"></i></li>"; }).join("") + "</ul>" +
-      "<div><small class=\"kv-k\">dokument</small><div class=\"dy-page\" id=\"yP\"><span class=\"dy-genre\" id=\"yG\"></span><div id=\"ySecs\"></div><div class=\"rows\" id=\"yRows\"></div><div class=\"badge\" id=\"yB\"><i data-lucide=\"quote\" class=\"icon\"></i><span></span></div></div></div>" +
-      "</div>";
-    let form = el("yF"), fields = el("yFields"), sug = el("ySug"), rail = [el("yR0"), el("yR1"), el("yR2")], page = el("yP"), genre = el("yG"), secs = el("ySecs"), rows = el("yRows"), badge = el("yB");
-    function showAll(box, from, to, gap) { Array.prototype.forEach.call(box.children, function (c, k) { if (k >= from && k < to) { wait(function () { c.classList.add("show"); }, (k - from) * gap); } }); }
-    // Wypełnianie formularza: pola pokazują się po kolei, wartości są "wpisywane" znak po znaku
-    function typeFields(list) {
-      let t = 0, CH = 22, GAP = 260;
-      list.forEach(function (f, k) {
-        let field = fields.children[k], val = field.lastChild, text = f[1];
-        (wait(function () { field.classList.add("show", "typing"); }, t));
-        t += 180;
-        if (f[2] === "missing") { (wait(function () { field.classList.remove("typing"); }, t + 500)); t += 700; return; }
-        for (let i = 1; i <= text.length; i += 1) {
-          (function (i) { (wait(function () { val.textContent = text.slice(0, i); }, t + i * CH)); }(i));
-        }
-        t += text.length * CH + 120;
-        (wait(function () { field.classList.remove("typing"); }, t));
-        t += GAP;
-      });
-    }
-    return {
-      reset: function (s) {
-        form.className = "card dy-form"; page.className = "dy-page"; genre.textContent = "wzorzec: " + s.fields[0][1];
-        fields.innerHTML = s.fields.map(function (f, k) { return "<div class=\"dy-field" + (k === 0 ? " select" : "") + (f[2] ? " " + f[2] : "") + "\"><b>" + esc(f[0]) + "</b><span></span></div>"; }).join("");
-        sug.className = "dy-suggest"; sug.textContent = s.suggest || "";
-        rail.forEach(function (x) { x.classList.remove("on"); });
-        secs.innerHTML = s.sections.map(function (sec) { return "<div class=\"dy-sec\"><b>" + esc(sec[0]) + "</b><span>" + sec[1] + "</span></div>"; }).join("");
-        rows.innerHTML = ""; badge.className = "badge";
-      },
-      step: function (n, s) {
-        let N = s.sections.length;
-        if (n === 0) { form.classList.add("on"); typeFields(s.fields); }
-        if (n === 1) { form.className = "card dy-form done"; page.classList.add("show"); showAll(secs, 0, 1, 0); }
-        if (n === 2) {
-          rail[0].classList.add("on");
-          if (s.fill) { sug.classList.add("show"); let f = fields.children[s.fill[0]]; wait(function () { f.className = "dy-field show filled"; f.lastChild.textContent = s.fill[1]; }, 900); }
-        }
-        if (n === 3) { rail[1].classList.add("on"); showAll(secs, 1, N - 1, 350); if (s.fill) { secs.children[2].classList.add("hot"); } }
-        if (n === 4) { rail[2].classList.add("on"); showAll(secs, N - 1, N, 0); }
-        if (n === 5) { page.classList.add("on"); Array.prototype.forEach.call(secs.children, function (c) { c.classList.remove("hot"); }); }
-        if (n === 6) { addRows(rows, s.rows, 250); setBadge(badge, s, p); }
-      }
-    };
-  }
-
-  // Papkin: ścieżka dźwięku -> transkrypcja z mówcami -> dokumenty
-  function papkinView(p) {
-    let BARS = 72;
-    refs.view.innerHTML = "<div class=\"kv kv-papkin\">" +
-      "<div class=\"pa-wave\"><small class=\"kv-k\" id=\"wK\"></small><div class=\"pa-bars\" id=\"wBars\"></div><div class=\"pa-legend\" id=\"wLeg\"></div></div>" +
-      "<div class=\"pa-body\"><div class=\"pa-script\"><small class=\"kv-k\">transkrypcja</small><div id=\"wLines\"></div><div class=\"pa-task\" id=\"wTask\"></div></div>" +
-      "<div class=\"pa-docs\"><small class=\"kv-k\">dokumentacja spotkania</small><div id=\"wDocs\"></div><div class=\"badge\" id=\"wB\"><i data-lucide=\"send\" class=\"icon\"></i><span></span></div></div></div>" +
-      "</div>";
-    let bars = el("wBars"), leg = el("wLeg"), lines = el("wLines"), task = el("wTask"), docs = el("wDocs"), badge = el("wB"), kick = el("wK");
-    // Napisy na żywo: słowa pojawiają się kolejno, tłumaczenie wchodzi po skończonym zdaniu
-    function captions(list) {
-      let t = 0, WORD = 170, GAP = 380;
-      list.forEach(function (l, k) {
-        let line = lines.children[k], txt = line.querySelector(".pa-txt"), tr = line.querySelector(".tr"), words = l[1].split(" ");
-        (wait(function () { line.classList.add("show", "typing"); }, t));
-        words.forEach(function (_, i) {
-          (wait(function () { txt.textContent = words.slice(0, i + 1).join(" "); }, t + (i + 1) * WORD));
-        });
-        t += words.length * WORD + 200;
-        (wait(function () { line.classList.remove("typing"); if (tr) { tr.classList.add("show"); } }, t));
-        t += GAP;
-      });
-    }
-    let seed = 7; function rnd() { seed = (seed * 9301 + 49297) % 233280; return seed / 233280; }
-    bars.innerHTML = Array.apply(null, Array(BARS)).map(function () { return "<i style=\"height:" + Math.round(18 + rnd() * 78) + "%\"></i>"; }).join("");
-    function segOf(s, k) { let acc = 0, pct = k / BARS * 100; for (let j = 0; j < s.segments.length; j += 1) { acc += s.segments[j][1]; if (pct < acc) { return j; } } return s.segments.length - 1; }
-    return {
-      reset: function (s) {
-        kick.textContent = s.live ? "dźwięk ze spotkania · na żywo" : "nagranie audio";
-        bars.className = "pa-bars" + (s.live ? " live" : ""); Array.prototype.forEach.call(bars.children, function (b) { b.className = ""; });
-        leg.innerHTML = s.segments.map(function (sg, k) { return "<span class=\"pa-spk s" + k + "\"><i></i>" + esc(sg[0]) + "</span>"; }).join("");
-        lines.innerHTML = s.lines.map(function (l) { let k = s.segments.map(function (sg) { return sg[0]; }).indexOf(l[0]); return "<div class=\"pa-line s" + k + "\"><b>" + esc(l[0]) + "</b><span><span class=\"pa-txt\"></span>" + (l[2] ? "<span class=\"tr\">" + esc(l[2]) + "</span>" : "") + "</span></div>"; }).join("");
-        task.className = "pa-task"; task.innerHTML = s.task;
-        docs.innerHTML = s.rows.map(function (r) { return "<div class=\"pa-doc\"><i data-lucide=\"" + r[0] + "\" class=\"icon\"></i>" + esc(r[1]) + "</div>"; }).join("");
-        badge.className = "badge";
-      },
-      step: function (n, s) {
-        if (n === 0) { bars.classList.add("show"); }
-        if (n === 1) { bars.classList.add("scan"); }
-        if (n === 2) { bars.classList.remove("scan", "live"); Array.prototype.forEach.call(bars.children, function (b, k) { b.className = "s" + segOf(s, k); }); Array.prototype.forEach.call(leg.children, function (c, k) { wait(function () { c.classList.add("show"); }, k * 250); }); }
-        if (n === 3) { captions(s.lines); }
-        if (n === 4) { task.classList.add("show"); }
-        if (n === 5) { Array.prototype.forEach.call(docs.children, function (c, k) { wait(function () { c.classList.add("show"); }, k * 300); }); }
-        if (n === 6) { setBadge(badge, s, p); }
-      }
-    };
-  }
-
-  // Gerwazy: lista kontrolna budzi się wiersz po wierszu; dopasowanie pokazuje kolor obrysu (biały+róż podczas szukania, zielony/czerwony po ocenie)
-  function gerwazyView(p) {
-    refs.view.innerHTML = "<div class=\"kv kv-gerwazy\">" +
-      "<div class=\"gw-col\"><small class=\"kv-k\" id=\"gReqK\">lista kontrolna</small><div class=\"gw-list\" id=\"gReqs\"></div></div>" +
-      "<div class=\"gw-col\"><small class=\"kv-k\" id=\"gDocK\">dokumentacja organizacji</small><div class=\"gw-list gw-frags\" id=\"gDocs\"></div></div>" +
-      "<div class=\"gw-side\"><small class=\"kv-k\">raport zgodności</small><div class=\"card gw-sum\" id=\"gSum\"><h3><i data-lucide=\"file-check\" class=\"icon\"></i><span>Ocena zgodności</span></h3>" +
-      "<div class=\"gw-meter\" id=\"gMeter\"></div><div class=\"gw-met\" id=\"gMet\"></div><div class=\"gw-agents\" id=\"gAg\">" + p.nodes.process.icons.map(function (ic) { return "<span><i data-lucide=\"" + ic + "\" class=\"icon\"></i></span>"; }).join("") + "</div>" +
-      "<div class=\"badge\" id=\"gB\"><i data-lucide=\"quote\" class=\"icon\"></i><span></span></div></div></div>" +
-      "</div>";
-    let reqs = el("gReqs"), docs = el("gDocs"), reqK = el("gReqK"), docK = el("gDocK"), sum = el("gSum"), meter = el("gMeter"), met = el("gMet"), ag = el("gAg"), badge = el("gB");
-    return {
-      reset: function (s) {
-        reqK.textContent = s.req; docK.textContent = s.doc;
-        reqs.innerHTML = s.pairs.map(function (pr) { return "<div class=\"card gw-item\"><b>" + esc(pr.req) + "</b><em>" + esc(pr.ref) + "</em><span class=\"gw-verdict\"></span></div>"; }).join("");
-        docs.innerHTML = s.frags.map(function (f) { return "<div class=\"card gw-item gw-doc\"><q>" + esc(f[0]) + "</q><em>" + esc(f[1]) + "</em><span class=\"gw-ctx\">" + esc(f[2]) + "</span></div>"; }).join("");
-        reqs.style.gridTemplateRows = "repeat(" + s.pairs.length + ", minmax(0, 1fr))";
-        docs.style.gridTemplateRows = "repeat(" + s.frags.length + ", minmax(0, 1fr))";
-        sum.className = "card gw-sum"; meter.innerHTML = s.pairs.map(function () { return "<i></i>"; }).join(""); met.textContent = "";
-        Array.prototype.forEach.call(ag.children, function (a) { a.classList.remove("on"); });
-        badge.className = "badge";
-      },
-      step: function (n, s) {
-        let STEP = 700;   // 6 par × 700 + 720 ms mieści się przed krokiem 5 (5100 ms)
-        if (n === 0) { Array.prototype.forEach.call(docs.children, function (d, k) { at(k * 120, function () { d.classList.add("show"); }); }); }
-        if (n === 1) { Array.prototype.forEach.call(reqs.children, function (r, k) { at(k * 90, function () { r.classList.add("show"); }); }); }
-        if (n === 2) {
-          ag.children[0].classList.add("on");
-          s.pairs.forEach(function (pr, k) {
-            let row = reqs.children[k], v = row.querySelector(".gw-verdict"), doc = pr.frag >= 0 ? docs.children[pr.frag] : null;
-            at(k * STEP, function () {
-              row.classList.add("live");
-              Array.prototype.forEach.call(docs.children, function (d) { if (!d.classList.contains("ok") && !d.classList.contains("gap")) { d.classList.add("scan"); } });
-              if (k === 2) { ag.children[1].classList.add("on"); }
-              if (k === 4) { ag.children[2].classList.add("on"); }
-            });
-            at(k * STEP + 300, function () { Array.prototype.forEach.call(docs.children, function (d) { d.classList.remove("scan"); }); if (doc) { doc.classList.add("live"); } });
-            at(k * STEP + 720, function () {
-              row.classList.remove("live"); row.classList.add(pr.state);
-              if (doc) { doc.classList.remove("live"); doc.classList.add(pr.state); }
-              v.textContent = pr.verdict; v.className = "gw-verdict show " + pr.state;
-              meter.children[k].className = pr.state;
-            });
-          });
-        }
-        if (n === 5) { sum.classList.add("on"); met.textContent = s.met + " z " + s.total + " wymagań spełnionych"; }
-        if (n === 6) { setBadge(badge, s, p); }
-      }
-    };
-  }
-
-  // Ocena modeli: tabela wyników, która przestawia się na żywo po każdym kryterium
-  function ocenaView(p) {
-    let M = p.viz.models, C = p.viz.criteria, ROW = 100 / M.length;
-    refs.view.innerHTML = "<div class=\"kv kv-ocena\">" +
-      "<div class=\"card oc-task\" id=\"oT\"><i data-lucide=\"" + p.nodes.input.icon + "\" class=\"icon\"></i><small>" + esc(p.nodes.input.title) + "</small><p class=\"oc-q\" id=\"oTT\"></p></div>" +
-      "<div class=\"oc-samples\" id=\"oSam\"><small class=\"kv-k\" id=\"oSamK\"></small><div id=\"oSamL\"></div></div>" +
-      "<div class=\"oc-board\"><div class=\"oc-head\"><small class=\"kv-k\">wyniki wg jednolitych kryteriów</small><div class=\"oc-crit\" id=\"oCrit\">" + C.map(function (c, k) { return "<div class=\"oc-c c" + k + "\"><i data-lucide=\"" + p.nodes.process.icons[k] + "\" class=\"icon\"></i><span>" + esc(c) + "</span></div>"; }).join("") + "</div></div><div class=\"oc-rows\" id=\"oRows\">" +
-      M.map(function (m, k) { return "<div class=\"oc-row\" id=\"oR" + m[0] + "\" style=\"top:" + (k * ROW) + "%\"><span class=\"oc-rank\"></span><div class=\"oc-name\"><b>" + esc(m[1]) + "</b><em>" + esc(m[2]) + "</em></div><div class=\"oc-track\"><i class=\"c0\"></i><i class=\"c1\"></i><i class=\"c2\"></i></div><span class=\"oc-total\"></span></div>"; }).join("") +
-      "</div><div class=\"badge\" id=\"oB\"><i data-lucide=\"award\" class=\"icon\"></i><span></span></div></div>" +
-      "</div>";
-    let task = el("oT"), tt = el("oTT"), crit = el("oCrit"), sam = el("oSam"), samK = el("oSamK"), samL = el("oSamL"), rows = M.map(function (m) { return el("oR" + m[0]); }), badge = el("oB"), rowsBox = el("oRows");
-    function sums(s, upto) { return M.map(function (m) { return s.scores[m[0]].slice(0, upto).reduce(function (a, b) { return a + b; }, 0); }); }
-    function reorder(s, upto) {
-      let tot = sums(s, upto), order = M.map(function (_, k) { return k; }).sort(function (a, b) { return tot[b] - tot[a]; });
-      order.forEach(function (mi, rank) { rows[mi].style.top = (rank * ROW) + "%"; rows[mi].querySelector(".oc-rank").textContent = "#" + (rank + 1); });
-    }
-    return {
-      reset: function (s) {
-        task.className = "card oc-task"; tt.textContent = s.input;
-        sam.className = "oc-samples"; samK.textContent = s.samplesLabel;
-        samL.innerHTML = s.samples.map(function (x, k) { return "<div class=\"card oc-s\"><b>test " + (k + 1) + "</b><span>" + esc(x[0]) + "</span><em>" + esc(x[1]) + "</em></div>"; }).join("");
-        Array.prototype.forEach.call(crit.children, function (c) { c.classList.remove("on"); });
-        rows.forEach(function (r, k) { r.className = "oc-row"; r.style.top = (k * ROW) + "%"; r.querySelector(".oc-rank").textContent = ""; r.querySelector(".oc-total").textContent = ""; Array.prototype.forEach.call(r.querySelectorAll(".oc-track i"), function (i) { i.style.width = "0"; }); });
-        rowsBox.className = "oc-rows"; badge.className = "badge";
-      },
-      step: function (n, s) {
-        if (n === 0) { task.classList.add("on"); }
-        if (n === 1) { task.className = "card oc-task done"; rowsBox.classList.add("show"); sam.classList.add("show"); Array.prototype.forEach.call(samL.children, function (c, k) { wait(function () { c.classList.add("show"); }, k * 250); }); }
-        if (n >= 2 && n <= 4) {
-          let k = n - 2; crit.children[k].classList.add("on");
-          M.forEach(function (m) { rows[M.indexOf(m)].querySelector(".oc-track .c" + k).style.width = (s.scores[m[0]][k] / 3) + "%"; });
-          at(700, function () { reorder(s, k + 1); });
-        }
-        if (n === 5) {
-          M.forEach(function (m, i) { let sc = s.scores[m[0]]; rows[i].querySelector(".oc-total").textContent = Math.round(sc.reduce(function (a, b) { return a + b; }, 0) / 3) + "/100"; });
-          rows[M.map(function (m) { return m[0]; }).indexOf(s.best)].classList.add("best");
-        }
-        if (n === 6) { setBadge(badge, s, p); }
-      }
-    };
-  }
-  const VIEWS = { klara: klaraView, kmicic: kmicicView, dyndalski: dyndalskiView, papkin: papkinView, gerwazy: gerwazyView, ocena: ocenaView };
-
   // ─── Silnik pętli: produkty × scenariusze, auto / ręczny / pauza ───
   function setState(state) {
     st.setAttribute("data-state", state);
@@ -493,7 +174,7 @@
     refs.copy.classList.add("swap");
     setTimeout(function () { refs.name.textContent = p.name; refs.tag.innerHTML = p.tagline; refs.copy.classList.remove("swap"); }, 300);
     renderTabs(p);
-    view = (VIEWS[p.id] || flowView)(p);
+    view = viewFor(p);
     st.setAttribute("data-product", p.id);
   }
   function play(k, i) {
@@ -506,7 +187,7 @@
     refs.phase.textContent = "";
     view.reset(s); st.setAttribute("data-phase", "0"); icons(refs.view);
     schedule();
-    heroTick();
+    CO.heroTick();
   }
   // Tryb automatyczny: jeden scenariusz z każdej symulacji, w kolejnym obiegu następny scenariusz
   function advanceAuto() {
@@ -550,353 +231,6 @@
     }
   }
 
-  // ─── Robot (robot.js): włączany z ustawień, zapamiętany w localStorage ───
-  const ROBOT_REMARKS = {
-    zagloba:   ["Zagłoba zawsze pokazuje, skąd wziął odpowiedź.", "Pytanie, szukanie, odpowiedź ze źródłem. Trzy kroki."],
-    dyndalski: ["Formularz wchodzi, dokument wychodzi. Bez kopiuj-wklej.", "Brakuje danych? Dyndalski dopyta, zanim napisze."],
-    gerwazy:   ["Gerwazy sprawdza wymaganie po wymaganiu.", "Czerwone pole to luka w dokumentacji, nie w Gerwazym."],
-    klara:     ["Klara wie, które dane nie mogą wyjść z firmy.", "Lokalnie, APIQ albo frontier. Router decyduje."],
-    kmicic:    ["Kmicic proponuje, człowiek zatwierdza.", "Skrzynka pełna? Kmicic ją posortuje."],
-    ocena:     ["Ten sam test dla każdego modelu. Fair play.", "Wynik to trzy kryteria, nie wrażenie."],
-    papkin:    ["Papkin słucha, zapisuje, rozdziela zadania.", "Kto co obiecał na spotkaniu? Papkin pamięta."],
-    default:   ["Cześć! Podejdź, pokażę ci demo."]
-  };
-  // Zaczepki do publiczności (czwarta ściana), wplecione między uwagi o produkcie
-  const ROBOT_ASIDES = ["Hej, obejrzyj demo!", "Niezła konfa?", "Gdzie idziesz? Zostań chwilę.", "Śmiało, dotknij ekranu.", "Kawa była? To teraz demo.", "Widzę cię. Podejdź bliżej.", "Ja tu tylko pilnuję kart.", "Trzy scenariusze, wybierz jeden."];
-  Object.keys(ROBOT_REMARKS).forEach(function (k, i) {
-    if (k === "default") { return; }
-    let own = ROBOT_REMARKS[k], mixed = [];
-    own.forEach(function (line, j) { mixed.push(line); mixed.push(ROBOT_ASIDES[(i * 2 + j) % ROBOT_ASIDES.length]); });
-    ROBOT_REMARKS[k] = mixed;
-  });
-  // Wspólna obsługa przełącznika postaci: localStorage, atrybut sceny, przycisk, płótno (pokazane przed pomiarem), dymek
-  function companionToggle(key, btn, canvas, bubble, on) {
-    try { localStorage.setItem("kiosk-" + key, on ? "1" : "0"); } catch (e) {}
-    st.setAttribute("data-" + key + "-enabled", on ? "1" : "0");
-    btn.setAttribute("aria-pressed", on ? "true" : "false");
-    btn.lastChild.textContent = on ? "włączony" : "wyłączony";
-    if (canvas) { canvas.hidden = !on; }
-    if (bubble) { bubble.classList.toggle("off", !on); }
-  }
-  let robot = null, robotOn = false;
-  function setRobot(on) {
-    robotOn = !!on;
-    let canvas = document.getElementById("robot"), bubble = document.getElementById("robotBubble");
-    companionToggle("robot", refs.robotBtn, canvas, bubble, robotOn);
-    if (robotOn && !robot && window.Robot && canvas) {
-      let renderer = window.Robot.create({ canvas: canvas, smooth: true, unit: function () { return px(9); } });   // wersja wygładzona; rozmiar woksela skaluje się z kadrem
-      robot = { renderer: renderer, director: window.Robot.kiosk({ renderer: renderer, stage: "#stage", view: "#kView", bubble: bubble, remarks: ROBOT_REMARKS, speed: function () { return speed; }, walkSpeed: function () { return px(170); }, bounds: frameRect, origin: frameOrigin, scale: scale, ticker: ticker }) };
-    }
-    if (robot) { robot.renderer.pose.visible = robotOn; if (robotOn) { robot.renderer.resize(); robot.director.restart(); } }
-  }
-
-  // ─── Kot (robot.js, model "cat"): raz na symulację przechodzi po górnych krawędziach kart (skacze nad przerwami, miauczy, czasem się przeciąga);
-  //     rzadko, gdy robot stoi z przodu sceny, zamiast tego wchodzi na scenę i przez chwilę chodzi za robotem ───
-  let cat = null, catOn = false;
-  function makeCat(renderer, canvas, bubble) {
-    let pose = renderer.pose, C = { active: false, mode: null, product: null, t: 0, path: [], seg: 0, meowAt: 0, meowed: false, startAt: 0, bubbleUntil: 0, followUntil: 0, leaving: false, idleT: 0, stretchUntil: 0, lastYaw: 0 };
-    const FOLLOW_CHANCE = 0.22, FOLLOW_GAP = 1.3;   // szansa na tryb "za robotem" i odstęp od robota (w szerokościach kota)
-    const LEFTWARD_CHANCE = 0.25;                     // szansa, że trasa po górze idzie z prawej do lewej
-    let SEL = ".fl-node, .card, .dy-page, .pa-wave, .pa-script, .pa-docs, .km-mail, .km-analysis, .km-lane, .gw-item, .oc-row, .kr-out";
-    let SPEED = 150, JUMP_SPEED = 260;   // prędkości w px/s przy skali 1
-    const bounds = renderer.bounds;      // rozmiar kota w px, odświeżany przez renderer.resize(); bounds.w = szerokość
-    function topRow() {   // górne krawędzie kart w układzie kadru; progi rozmiaru skalują się z kadrem jak same karty
-      let view = document.getElementById("kView"), o = frameOrigin(), list = [], min = px(60);
-      view.querySelectorAll(SEL).forEach(function (e) { let r = e.getBoundingClientRect(); if (r.width > min && r.height > min) { list.push({ left: r.left - o.left, right: r.right - o.left, top: r.top - o.top }); } });
-      if (!list.length) { return []; }
-      let minTop = Math.min.apply(null, list.map(function (r) { return r.top; })), rowGap = px(40), mergeGap = px(10);
-      let row = list.filter(function (r) { return r.top < minTop + rowGap; }).sort(function (a, b) { return a.left - b.left; });
-      let merged = [];
-      row.forEach(function (r) { let last = merged[merged.length - 1]; if (last && r.left < last.right + mergeGap) { last.right = Math.max(last.right, r.right); } else { merged.push({ left: r.left, right: r.right, top: r.top }); } });
-      return merged;
-    }
-    function plan() {
-      let row = topRow(), fr = frameRect(), W = bounds.w;
-      if (!row.length) { return false; }
-      let dir = Math.random() < LEFTWARD_CHANCE ? -1 : 1, cards = dir > 0 ? row : row.slice().reverse();
-      let y = row[0].top - 2, path = [];
-      C.dir = dir;
-      path.push({ x: dir > 0 ? fr.left - W : fr.right + W, y: y, walk: true, speed: SPEED });
-      cards.forEach(function (c, k) {
-        path.push({ x: dir > 0 ? c.right - W * 0.25 : c.left + W * 0.25, y: c.top - 2, walk: true, speed: SPEED });
-        if (k < cards.length - 1) { let n = cards[k + 1]; path.push({ x: dir > 0 ? n.left + W * 0.25 : n.right - W * 0.25, y: n.top - 2, walk: false, speed: JUMP_SPEED, jump: true }); }
-      });
-      path.push({ x: dir > 0 ? fr.right + W : fr.left - W, y: y, walk: true, speed: SPEED });
-      // czasem zatrzymuje się na jednej z kart: odwraca się do widza i miauczy albo przeciąga się (bokiem) i mruczy
-      if (Math.random() < 0.7) {
-        let c = row[Math.floor(Math.random() * row.length)];
-        let px = c.left + (c.right - c.left) * (0.3 + Math.random() * 0.4);
-        let ix = path.findIndex(function (pt) { return !pt.jump && (dir > 0 ? pt.x >= px : pt.x <= px); });
-        let stretch = Math.random() < 0.45;
-        if (ix > 0) { path.splice(ix, 0, { x: px, y: c.top - 2, walk: true, speed: SPEED }, { x: px, y: c.top - 2, stop: stretch ? 3 + Math.random() * 1.2 : 1.6 + Math.random() * 1.2, meow: !stretch, stretch: stretch }); }
-      }
-      C.path = path; C.seg = 0; C.stopT = 0;
-      pose.x = path[0].x; pose.y = path[0].y; pose.lift = 0;
-      C.meowAt = 0.25 + Math.random() * 0.5; C.meowed = path.some(function (pt) { return pt.meow; });   // miau w trakcie marszu tylko, gdy nie ma postoju
-      return true;
-    }
-    function update(dt) {
-      C.t += dt;
-      let product = st.getAttribute("data-product");
-      if (product !== C.product) { C.product = product; C.active = false; C.startAt = C.t + 2 + Math.random() * 5; }
-      if (!C.active && C.startAt && C.t >= C.startAt) {
-        C.startAt = 0;
-        if (robotInFront() && Math.random() < FOLLOW_CHANCE) { startFollow(); }
-        else if (plan()) { C.active = true; C.mode = "top"; }
-      }
-      let walking = false, stretching = false, yaw = 0;
-      if (C.active && C.mode === "follow") {
-        let r = followStep(dt); walking = r.walking; stretching = r.stretching; yaw = r.yaw;
-      } else if (C.active && C.path[C.seg].stop) {
-        let sp = C.path[C.seg];
-        C.stopT += dt * speed;
-        stretching = !!sp.stretch;
-        yaw = stretching ? (C.dir || 1) * renderer.WALK_YAW - renderer.CAM_YAW : 0;   // przeciąganie bokiem, miauczenie twarzą do widza
-        if (sp.meow && !sp.said && C.stopT > 0.5) { sp.said = true; bubble.textContent = "Miau."; bubble.classList.add("on"); C.bubbleUntil = C.t + 1.6; }
-        if (sp.stretch && !sp.said && C.stopT > 1.4) { sp.said = true; bubble.textContent = "Mrrr."; bubble.classList.add("on"); C.bubbleUntil = C.t + 1.4; }
-        if (C.stopT >= sp.stop) { C.stopT = 0; C.seg += 1; if (C.seg >= C.path.length) { C.active = false; } }
-      } else if (C.active) {
-        let seg = C.path[C.seg];
-        let dx = seg.x - pose.x, dy = seg.y - pose.y, d = Math.hypot(dx, dy), step = px(seg.speed) * dt * speed;
-        if (seg.jump) {
-          let prev = C.path[C.seg - 1], span = Math.hypot(seg.x - prev.x, seg.y - prev.y) || 1, done = 1 - d / span;
-          pose.lift = Math.max(0, Math.sin(done * Math.PI) * 7);
-        } else { pose.lift = 0; }
-        if (d <= step) { pose.x = seg.x; pose.y = seg.y; C.seg += 1; if (C.seg >= C.path.length) { C.active = false; pose.lift = 0; } }
-        else { pose.x += dx / d * step; pose.y += dy / d * step; }
-        walking = !!seg.walk; yaw = (C.dir || 1) * renderer.WALK_YAW - renderer.CAM_YAW;
-        let progress = C.seg / C.path.length;
-        if (!C.meowed && progress >= C.meowAt) { C.meowed = true; bubble.textContent = Math.random() < 0.7 ? "Miau." : "Mrrr."; bubble.classList.add("on"); C.bubbleUntil = C.t + 1.6; }
-      }
-      renderer.animate(dt, { walking: walking, waving: false, stretching: stretching, airborne: pose.lift > 0, yawTarget: yaw });
-      if (C.bubbleUntil && (C.t > C.bubbleUntil || !C.active)) { hideBubble(); }   // dymek nie przeżywa kota (zmiana sceny, resize, koniec trasy)
-      let phase = !C.active ? "idle" : stretching ? "stretch" : C.mode === "follow" ? (walking ? "follow" : "wait") : (C.path[C.seg] && C.path[C.seg].stop ? "stop" : "walk");
-      st.setAttribute("data-cat", phase + (C.active ? ":" + Math.round(pose.x) + "," + Math.round(pose.y) : ""));
-    }
-    // ── tryb "za robotem": kot wchodzi z brzegu na poziom robota, trzyma się o krok za nim, w przerwach czasem się przeciąga, po chwili schodzi ze sceny
-    function robotInFront() {
-      if (!robotOn || !robot) { return false; }
-      let rp = robot.renderer.pose, fr = frameRect(), W = bounds.w;
-      return robot.director.state.layer === "front" && rp.x > fr.left + W && rp.x < fr.right - W;
-    }
-    function startFollow() {
-      let rp = robot.renderer.pose, fr = frameRect(), W = bounds.w;
-      C.mode = "follow"; C.active = true; C.leaving = false; C.idleT = 0; C.stretchUntil = 0;
-      C.followUntil = C.t + 9 + Math.random() * 6; C.meowed = false; C.meowAt = C.t + 1.5;
-      pose.x = rp.x > fr.left + fr.width / 2 ? fr.left - W : fr.right + W; pose.y = rp.y; pose.lift = 0;
-    }
-    function followStep(dt) {
-      let rp = robot.renderer.pose, out = { walking: false, stretching: false, yaw: 0 }, fr = frameRect(), W = bounds.w;
-      if (!C.leaving && (C.t > C.followUntil || !robotOn || robot.director.state.layer !== "front")) { C.leaving = true; C.exitX = pose.x < fr.left + fr.width / 2 ? fr.left - W : fr.right + W; C.stretchUntil = 0; }
-      let gap = W * FOLLOW_GAP, tx = C.leaving ? C.exitX : rp.x + (pose.x < rp.x ? -gap : gap), ty = C.leaving ? pose.y : rp.y;
-      let dx = tx - pose.x, dy = ty - pose.y, d = Math.hypot(dx, dy), step = px(SPEED) * dt * speed;
-      if (C.stretchUntil) {
-        out.stretching = C.t < C.stretchUntil; out.yaw = C.lastYaw;
-        if (!out.stretching) { C.stretchUntil = 0; }
-        return out;
-      }
-      if (d > 6) {
-        pose.x += dx / d * Math.min(step, d); pose.y += dy / d * Math.min(step, d);
-        out.walking = true; out.yaw = C.lastYaw = Math.sign(dx) * renderer.WALK_YAW - renderer.CAM_YAW; C.idleT = 0;
-        if (!C.meowed && C.t > C.meowAt) { C.meowed = true; bubble.textContent = "Miau."; bubble.classList.add("on"); C.bubbleUntil = C.t + 1.6; }
-      } else if (C.leaving) {
-        C.active = false; C.mode = null;
-      } else {
-        C.idleT += dt * speed; out.yaw = 0;   // czeka obok robota twarzą do widza
-        if (C.idleT > 1.2 && Math.random() < dt * speed * 0.35) { C.stretchUntil = C.t + 2.4 + Math.random(); }
-      }
-      return out;
-    }
-    function render() {
-      if (!C.active) { if (C.drawn) { renderer.clear(); C.drawn = false; } return; }   // bezczynny kot nie czyści płótna co klatkę
-      renderer.clear(); renderer.draw(null); C.drawn = true;
-      if (C.bubbleUntil) {
-        let h = renderer.headTop(), fr = frameRect(), W = bounds.w;
-        if (h[0] < fr.left + W * 0.5 || h[0] > fr.right - W * 0.5) { hideBubble(); }   // kot poza kadrem: dymek znika zamiast wisieć przy krawędzi
-        else { placeBubble(bubble, h, 0); }
-      }
-    }
-    function hideBubble() { bubble.classList.remove("on"); C.bubbleUntil = 0; }
-    function again() { C.active = false; hideBubble(); C.startAt = C.t + 0.5; }
-    addEventListener("resize", function () { renderer.resize(); again(); });   // po zmianie rozmiaru kot planuje trasę od nowa
-    ticker.add(function (dt) { if (catOn) { update(dt); render(); } });
-    return { state: C, again: again, renderer: renderer };
-  }
-  function setCat(on) {
-    catOn = !!on;
-    let canvas = document.getElementById("cat"), bubble = document.getElementById("catBubble");
-    companionToggle("cat", refs.catBtn, canvas, bubble, catOn);
-    if (catOn && !cat && window.Robot && canvas) {
-      let renderer = window.Robot.create({ canvas: canvas, model: "cat", smooth: true, unit: function () { return px(9); } });
-      cat = makeCat(renderer, canvas, bubble);
-    }
-    if (cat && catOn) { cat.renderer.resize(); cat.state.product = null; }   // płótno mogło zostać zmierzone jako 0×0, gdy było ukryte
-    if (cat && !catOn) { cat.renderer.clear(); bubble.classList.remove("on"); cat.state.bubbleUntil = 0; }
-  }
-
-  // ─── Bohaterowie (easter eggi, robot.js modele spider/iron/hulk): co drugi scenariusz jeden z trzech przelatuje przez ekran ───
-  //     spider: zjeżdża na nici z góry, huśta się po łuku przez ekran i odlatuje; iron: wzlatuje po skosie od dołu, twarzą do widza;
-  //     hulk: spada z góry na dół sceny (wstrząs, kurz), ryczy z rękami w górze, wali pięścią w ziemię (drugi wstrząs, pęknięcia), wyskakuje w górę
-  const HERO_KINDS = ["spider", "iron", "hulk"], HERO_EVERY = 2;
-  let hero = null, heroOn = false, heroPlays = 0, heroIx = Math.floor(Math.random() * HERO_KINDS.length);
-  function makeHero(canvas, bubble) {
-    let R = {}, H = { active: false, kind: null, phase: "idle", t: 0, launchAt: 0, pending: null, dust: [], cracks: [], bubbleUntil: 0 };
-    let ctx = null;
-    function renderer(kind) {
-      if (!R[kind]) { R[kind] = window.Robot.create({ canvas: canvas, model: kind, smooth: true, unit: kind === "hulk" ? function () { return px(12); } : function () { return px(9); } }); R[kind].pose.shadow = false; }
-      ctx = R[kind].ctx;
-      return R[kind];
-    }
-    let colors = {};
-    function color(name) { let k = st.getAttribute("data-theme") + name; return colors[k] || (colors[k] = getComputedStyle(document.documentElement).getPropertyValue(name).trim()); }
-    function launch(kind) {
-      let r = renderer(kind), p = r.pose, fr = frameRect(), W = fr.width, Hh = fr.height, L = fr.left, T = fr.top, s = scale();
-      r.resize();   // płótno mogło być ukryte (0×0) przy tworzeniu renderera lub zmianie rozmiaru
-      H.kind = kind; H.active = true; H.t = 0; H.dust = []; H.cracks = []; H.phase = "in"; H.pose = p; hideBubble();
-      p.lift = 0; p.pitch = 0; p.yaw = 0; p.poseA = 0; p.airborne = false; p.visible = true;
-      if (kind === "spider") {
-        H.dir = Math.random() < 0.5 ? 1 : -1;
-        H.x0 = L + (H.dir > 0 ? W * 0.12 : W * 0.88); H.y0 = T + Hh * 0.42;
-        H.anchor = [L + (H.dir > 0 ? W * 0.55 : W * 0.45), T - 12 * s];
-        p.x = H.x0; p.y = T - r.height * r.unit - 20 * s;
-      } else if (kind === "iron") {                                              // from a bottom corner up to the opposite top corner
-        H.dir = Math.random() < 0.5 ? 1 : -1;
-        p.x = L + (H.dir > 0 ? W * 0.12 : W * 0.88); p.y = T + Hh + 160 * s;
-        H.vx = H.dir * (W * 0.7) / 2.4; H.vy = -(Hh + 420 * s) / 2.4;
-      } else {
-        p.x = L + W * (0.2 + Math.random() * 0.6); p.y = T - r.height * r.unit - 40 * s;
-        H.vy = 0; H.ground = T + Hh - 18 * s;
-      }
-    }
-    function update(dt) {
-      if (!H.active) {
-        if (H.launchAt && (H.t += dt) >= H.launchAt) { H.launchAt = 0; launch(H.pending); }
-        return;
-      }
-      let r = R[H.kind], p = r.pose, fr = frameRect(), W = fr.width, Hh = fr.height, L = fr.left, T = fr.top, s = scale(), k = H.kind;
-      H.t += dt * speed; let ds = dt * speed;
-      let input = { walking: false, waving: false, airborne: false, yawTarget: 0, pose: null };
-      if (k === "spider") {
-        let ax = H.anchor[0], ay = H.anchor[1], hx = r.headTop();
-        input.pose = "hang";
-        if (H.phase === "in") {                                                       // drop on the thread to mid height
-          p.y = Math.min(H.y0, p.y + 520 * s * ds); input.yawTarget = 0;
-          if (p.y >= H.y0) { H.phase = "dangle"; H.pt = 0; }
-        } else if (H.phase === "dangle") {                                            // a moment facing the viewer
-          H.pt += ds; input.yawTarget = 0; p.x = H.x0 + Math.sin(H.t * 3) * 6 * s;
-          if (H.pt > 0.9) { H.phase = "swing"; H.pt = 0; H.L = Math.hypot(p.x - ax, p.y - ay); H.th0 = Math.atan2(p.x - ax, p.y - ay); }
-        } else if (H.phase === "swing") {                                             // pendulum arc across the screen, then release
-          H.pt += ds; let SWING = 1.7, th = H.th0 * Math.cos(Math.PI * Math.min(1, H.pt / SWING));   // SWING: czas huśtnięcia (s)
-          p.x = ax + Math.sin(th) * H.L; p.y = ay + Math.cos(th) * H.L;
-          input.yawTarget = H.dir * r.WALK_YAW - r.CAM_YAW; p.pitch = -th * 0.6 * H.dir;   // pochylony wzdłuż nici
-          if (H.pt >= SWING) { H.phase = "out"; H.vx = H.dir * 900 * s; H.vy = -700 * s; }
-        } else {                                                                      // ballistic exit
-          input.pose = "fly"; H.vy += 1500 * s * ds; p.x += H.vx * ds; p.y += H.vy * ds;
-          input.yawTarget = H.dir * r.WALK_YAW - r.CAM_YAW; p.pitch = 1.0;
-          if (p.x < L - 200 * s || p.x > L + W + 200 * s || p.y > T + Hh + 200 * s) { H.active = false; }
-        }
-      } else if (k === "iron") {
-        input.pose = "fly"; input.yawTarget = 0; p.pitch = -0.3;                 // facing the viewer, leaning back a little as he climbs
-        p.x += H.vx * ds; p.y += H.vy * ds;
-        if (p.y < T - r.height * r.unit - 80 * s) { H.active = false; }
-      } else {                                                                        // hulk
-        if (H.phase === "in") {
-          input.airborne = true; H.vy += 2600 * s * ds; p.y += H.vy * ds; input.yawTarget = 0;
-          if (p.y >= H.ground) {
-            p.y = H.ground; H.phase = "land"; H.pt = 0; shake(0.55);
-            for (let i = 0; i < 14; i++) { H.dust.push({ x: p.x + (Math.random() - 0.5) * 60 * s, y: p.y, vx: (Math.random() - 0.5) * 260 * s, vy: -Math.random() * 160 * s, r: (8 + Math.random() * 14) * s, a: 1 }); }
-          }
-        } else if (H.phase === "land") {                                          // crouched after the impact
-          input.pose = "land"; input.yawTarget = 0; H.pt += ds; ease(p, 0, 0, ds);
-          if (H.pt > 0.4) { H.phase = "roar"; H.pt = 0; say("RAAARGH!", 1.2); }
-        } else if (H.phase === "roar") {                                          // arms up, leaning back
-          input.pose = "roar"; input.yawTarget = 0; H.pt += ds; ease(p, -0.25, 0, ds);
-          if (H.pt > 1.1) { H.phase = "punch"; H.pt = 0; H.hit = false; }
-        } else if (H.phase === "punch") {                                         // drops into a crouch and slams the right fist into the ground
-          input.pose = "punch"; input.yawTarget = 0; H.pt += ds; ease(p, 0.5, -5, ds);
-          if (!H.hit && H.pt > 0.22) {
-            H.hit = true; shake(0.45);
-            let f = r.project(4, 6.7, 3.5);   // the right fist (arm swung forward-down) in screen px
-            for (let i = 0; i < 12; i++) { H.dust.push({ x: f[0] + (Math.random() - 0.5) * 30 * s, y: f[1], vx: (Math.random() - 0.5) * 300 * s, vy: -Math.random() * 200 * s, r: (6 + Math.random() * 12) * s, a: 1 }); }
-            for (let i = 0; i < 7; i++) {
-              let ang = Math.PI * (0.05 + Math.random() * 0.9) * (Math.random() < 0.5 ? 1 : -1), len = (50 + Math.random() * 90) * s, pts = [[f[0], f[1]]], x = f[0], y = f[1];
-              for (let j = 1; j <= 3; j++) { x += Math.cos(ang) * len / 3; y += Math.sin(ang) * len / 3 * 0.35; ang += (Math.random() - 0.5) * 0.9; pts.push([x, y]); }
-              H.cracks.push({ pts: pts, a: 1 });
-            }
-          }
-          if (H.pt > 0.9) { H.phase = "stand"; H.pt = 0; }
-        } else if (H.phase === "stand") {                                         // back up, then leap out
-          input.pose = "land"; input.yawTarget = 0; H.pt += ds; ease(p, 0, 0, ds);
-          if (H.pt > 0.6) { H.phase = "out"; H.vy = -2600 * s; H.vx = (Math.random() - 0.5) * 300 * s; }
-        } else {
-          input.airborne = true; H.vy += 1400 * s * ds; p.y += H.vy * ds; p.x += H.vx * ds; input.yawTarget = 0; ease(p, 0, 0, ds);
-          if (p.y < T - r.height * r.unit - 60 * s || p.y > T + Hh + 300 * s) { H.active = false; }
-        }
-        H.cracks.forEach(function (c) { c.a -= ds * 0.6; }); H.cracks = H.cracks.filter(function (c) { return c.a > 0; });
-        H.dust.forEach(function (d) { d.x += d.vx * ds; d.y += d.vy * ds; d.vy += 120 * s * ds; d.r += 30 * s * ds; d.a -= ds * 1.3; });
-        H.dust = H.dust.filter(function (d) { return d.a > 0; });
-      }
-      r.animate(dt, input);
-      if (H.bubbleUntil && (H.t > H.bubbleUntil || !H.active)) { hideBubble(); }
-      H.phase = H.active ? H.phase : "idle";
-      st.setAttribute("data-hero", H.active ? k + ":" + H.phase + ":" + Math.round(p.x) + "," + Math.round(p.y) : "idle");
-    }
-    function ease(p, pitch, lift, ds) { let k = Math.min(1, 14 * ds); p.pitch += (pitch - p.pitch) * k; p.lift += (lift - p.lift) * k; }
-    function say(text, sec) { bubble.textContent = text; bubble.classList.add("on"); H.bubbleUntil = H.t + sec; }
-    function hideBubble() { bubble.classList.remove("on"); H.bubbleUntil = 0; }
-    function shake(sec) {
-      let t0 = performance.now(), amp = px(9);
-      (function step(now) {
-        let f = 1 - (now - t0) / (sec * 1000);
-        if (f <= 0) { refs.view.style.transform = ""; return; }
-        refs.view.style.transform = "translate(" + ((Math.random() - 0.5) * amp * f * 2).toFixed(1) + "px," + ((Math.random() - 0.5) * amp * f * 2).toFixed(1) + "px)";
-        requestAnimationFrame(step);
-      })(t0);
-    }
-    function render() {
-      let r = R[H.kind];
-      if (!H.active || !r) { if (H.drawn && r) { r.clear(); H.drawn = false; } return; }   // bezczynne płótno czyszczone raz, nie co klatkę
-      r.clear(); H.drawn = true;
-      let p = r.pose;
-      if (H.kind === "spider" && H.phase !== "out") {                                 // the thread, from the anchor to the hands above the head
-        let h = r.headTop();
-        ctx.save(); ctx.strokeStyle = color("--hero-thread"); ctx.lineWidth = px(1.5); ctx.beginPath();
-        ctx.moveTo(H.phase === "swing" ? H.anchor[0] : p.x, H.phase === "swing" ? H.anchor[1] : frameRect().top - 12); ctx.lineTo(h[0], h[1] - px(8)); ctx.stroke(); ctx.restore();
-      }
-      if (H.kind === "hulk" && H.cracks.length) {                                 // cracks radiating from the fist
-        ctx.save(); ctx.strokeStyle = color("--hero-crack"); ctx.lineCap = "round";
-        H.cracks.forEach(function (c) { ctx.globalAlpha = Math.max(0, c.a); ctx.lineWidth = px(2.5); ctx.beginPath(); c.pts.forEach(function (q, i) { i ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1]); }); ctx.stroke(); });
-        ctx.restore();
-      }
-      if (H.kind === "hulk" && H.dust.length) {
-        ctx.save(); ctx.fillStyle = color("--hero-dust");
-        H.dust.forEach(function (d) { ctx.globalAlpha = Math.max(0, d.a) * 0.7; ctx.beginPath(); ctx.arc(d.x, d.y, d.r, 0, Math.PI * 2); ctx.fill(); });
-        ctx.restore();
-      }
-      r.draw(null);
-      if (H.bubbleUntil) { placeBubble(bubble, r.headTop(), -px(10)); }
-    }
-    addEventListener("resize", function () { Object.keys(R).forEach(function (k) { R[k].resize(); }); H.active = false; hideBubble(); });   // przerwany przelot nie zostawia dymka
-    ticker.add(function (dt) { if (heroOn) { update(dt); render(); } });
-    return { state: H, launch: launch, schedule: function (kind, delay) { H.pending = kind; H.launchAt = delay; H.t = 0; } };
-  }
-  function setHero(on) {
-    heroOn = !!on;
-    let canvas = document.getElementById("hero"), bubble = document.getElementById("heroBubble");
-    companionToggle("hero", refs.heroBtn, canvas, bubble, heroOn);
-    if (heroOn && !hero && window.Robot && canvas) { hero = makeHero(canvas, bubble); }
-    if (hero && !heroOn) { hero.state.active = false; hero.state.launchAt = 0; hero.state.bubbleUntil = 0; bubble.classList.remove("on"); refs.view.style.transform = ""; }
-  }
-  // wywoływane z play(): co drugi scenariusz planuje jednego bohatera (po kolei), kilka sekund po starcie
-  function heroTick() {
-    heroPlays += 1;
-    if (!heroOn || !hero) { return; }
-    hero.state.launchAt = 0;   // bohater w trakcie przelotu kończy go, tylko zaplanowany start przepada
-    if (heroPlays % HERO_EVERY !== 0) { return; }
-    let kind = HERO_KINDS[heroIx++ % HERO_KINDS.length];
-    hero.schedule(kind, 3 + Math.random() * 6);
-  }
-
   // ─── Ustawienia: tempo (zapamiętane w localStorage) ───
   function setSpeed(v) {
     let prevSpeed = speed;
@@ -930,9 +264,9 @@
   function listen() {
     Array.prototype.forEach.call(st.querySelectorAll(".k-btn, .k-pop-replay"), function (b) { b.addEventListener("click", function () { act(b.getAttribute("data-act")); }); });
     Array.prototype.forEach.call(refs.speeds.children, function (b) { b.addEventListener("click", function () { touch(); setSpeed(parseFloat(b.getAttribute("data-speed"))); }); });
-    refs.robotBtn.addEventListener("click", function () { touch(); setRobot(!robotOn); });
-    refs.catBtn.addEventListener("click", function () { touch(); setCat(!catOn); });
-    refs.heroBtn.addEventListener("click", function () { touch(); setHero(!heroOn); });
+    refs.robotBtn.addEventListener("click", function () { touch(); CO.setRobot(!CO.robotOn()); });
+    refs.catBtn.addEventListener("click", function () { touch(); CO.setCat(!CO.catOn()); });
+    refs.heroBtn.addEventListener("click", function () { touch(); CO.setHero(!CO.heroOn()); });
     st.addEventListener("pointerdown", function (e) { if (!refs.pop.hidden && !e.target.closest(".k-pop, [data-act=settings]")) { togglePop(false); } });
     Array.prototype.forEach.call(refs.rail.children, function (b) { b.addEventListener("click", function () { selectProduct(parseInt(b.getAttribute("data-p"), 10)); }); });
     st.addEventListener("pointerdown", function (e) { if (!e.target.closest(".k-tab, .k-btn, .k-theme, .k-rail, .k-pop")) { touch(); } });
@@ -956,11 +290,41 @@
       navigator.wakeLock.request("screen").then(function (l) { lock = l; l.addEventListener("release", function () { lock = null; setTimeout(wakeLock, 1000); }); }).catch(function () { setTimeout(wakeLock, 30000); });
     }
     document.addEventListener("visibilitychange", function () {
+      if (TEST) { return; }
       if (document.hidden) { if (st.getAttribute("data-state") === "playing") { pause(); hiddenPaused = true; } return; }
       wakeLock();   // przeglądarka zwalnia blokadę przy ukryciu karty
       if (hiddenPaused) { hiddenPaused = false; resume(); }
     });
     wakeLock();
+  }
+
+  // ─── Samotest (?test=1): każdy scenariusz każdego produktu odtwarzany do końca przy tempie 2×; wynik w data-test na scenie i w konsoli.
+  //     Uruchamiany bez sieci w headless Chrome przez scripts/smoke.sh; błąd skryptu lub scenariusz, który nie dochodzi do fazy 7, oznacza porażkę.
+  //     ?tick=timer (bez testu): ticker na setTimeout zamiast rAF, do zrzutów ekranu w headless ───
+  function selfTest() {
+    let errors = [], list = [], done = 0, failed = [];
+    PRODUCTS.forEach(function (p, k) { p.scenarios.forEach(function (_, i) { list.push([k, i]); }); });
+    addEventListener("error", function (e) { errors.push(String(e.message || e)); });
+    addEventListener("unhandledrejection", function (e) { errors.push(String(e.reason)); });
+    setSpeed(2); speed = 4; CO.setRobot(true); CO.setCat(true); CO.setHero(true);   // 4×: ~4 s na scenariusz, bez zapisu do localStorage
+    st.setAttribute("data-test", "running:0/" + list.length);
+    function next() {
+      if (done >= list.length) {
+        let ok = !errors.length && !failed.length;
+        st.setAttribute("data-test", (ok ? "ok:" : "fail:") + (list.length - failed.length) + "/" + list.length + (failed.length ? " missed=" + failed.join(";") : "") + (errors.length ? " errors=" + errors.join(" | ") : ""));
+        console.log("KIOSK TEST " + st.getAttribute("data-test"));
+        return;
+      }
+      let k = list[done][0], i = list[done][1], deadline = Date.now() + total / speed + 4000;
+      manual = true;   // koniec scenariusza nie przełącza sam dalej; test steruje ręcznie
+      play(k, i);
+      (function poll() {
+        if (st.getAttribute("data-phase") === "7" && st.getAttribute("data-state") === "done") { done += 1; st.setAttribute("data-test", "running:" + done + "/" + list.length); next(); return; }
+        if (Date.now() > deadline) { failed.push(PRODUCTS[k].id + "#" + i + "@" + st.getAttribute("data-phase")); done += 1; next(); return; }
+        setTimeout(poll, 100);
+      })();
+    }
+    next();
   }
 
   // ─── Watchdog: całodzienna praca stoiska. Błąd skryptu przeładowuje stronę; co kilka godzin przeładowanie na granicy scenariusza zwalnia pamięć ───
@@ -969,7 +333,7 @@
   function watchdog() {
     function reload() { try { sessionStorage.setItem("kiosk-resume", pi + "," + si); } catch (e) {} location.reload(); }
     let errT = null;
-    function onError() { if (!errT) { errT = setTimeout(reload, RELOAD_AFTER_ERROR_MS); } }
+    function onError() { if (!errT && !TEST) { errT = setTimeout(reload, RELOAD_AFTER_ERROR_MS); } }
     addEventListener("error", onError);
     addEventListener("unhandledrejection", onError);
     setTimeout(function () { reloadDue = true; }, RELOAD_EVERY_MS);
@@ -980,9 +344,11 @@
   st.className = "stage t-dark";
   st.innerHTML = chrome();
   icons(st);
-  refs = { frame: el("kFrame"), logo: el("kLogo"), rail: el("kRail"), theme: el("kTheme"), pop: el("kPop"), speeds: el("kSpeeds"), robotBtn: el("kRobot"), catBtn: el("kCat"), heroBtn: el("kHero"), setBtn: st.querySelector("[data-act=settings]"), copy: el("kCopy"), name: el("kName"), tag: el("kTag"), phase: el("kPhase"), view: el("kView"), tabs: el("kTabs"), mode: el("kMode"), prog: el("kProg"), progBar: el("kProgBar"), idle: el("kIdle") };
+  Object.assign(refs, { frame: el("kFrame"), logo: el("kLogo"), rail: el("kRail"), theme: el("kTheme"), pop: el("kPop"), speeds: el("kSpeeds"), robotBtn: el("kRobot"), catBtn: el("kCat"), heroBtn: el("kHero"), setBtn: st.querySelector("[data-act=settings]"), copy: el("kCopy"), name: el("kName"), tag: el("kTag"), phase: el("kPhase"), view: el("kView"), tabs: el("kTabs"), mode: el("kMode"), prog: el("kProg"), progBar: el("kProgBar"), idle: el("kIdle") });
   Array.prototype.forEach.call(document.querySelectorAll("#robot, #cat, #hero, .robot-wrap"), function (n) { refs.frame.appendChild(n); });   // warstwy postaci wewnątrz kadru: wspólny kontekst z-index z nagłówkiem, stopką i popoverem; overflow kadru je przycina
   syncFrame(); addEventListener("resize", syncFrame);
+  viewFor = window.KIOSK_VIEWS({ refs: refs, el: el, esc: esc, wait: wait, at: at, icons: icons, setIcon: setIcon, addRows: addRows, setBadge: setBadge });
+  CO = window.KIOSK_COMPANIONS({ st: st, refs: refs, px: px, scale: scale, frameRect: frameRect, frameOrigin: frameOrigin, ticker: ticker, speed: function () { return speed; } });
   initTheme();
   listen();
   setSpeed(SPEEDS.indexOf(speed) >= 0 ? speed : 1);
@@ -990,14 +356,15 @@
   function pref(key, fallback) { let v = URLP.get(key); if (v !== null) { return v; } try { return localStorage.getItem("kiosk-" + key) || fallback; } catch (e) { return fallback; } }
   if (SPEEDS.indexOf(parseFloat(URLP.get("speed"))) >= 0) { setSpeed(parseFloat(URLP.get("speed"))); }
   if (URLP.get("theme") === "light" || URLP.get("theme") === "dark") { applyTheme(URLP.get("theme")); }
-  setRobot(pref("robot", "1") === "1");
-  setCat(pref("cat", "1") === "1");
-  setHero(pref("hero", "1") === "1");
+  CO.setRobot(pref("robot", "1") === "1");
+  CO.setCat(pref("cat", "1") === "1");
+  CO.setHero(pref("hero", "1") === "1");
   st.setAttribute("data-mode", "loop");
   watchdog();
   let startP = parseInt(URLP.get("p") || "0", 10), startS = parseInt(URLP.get("s") || "0", 10) || 0;
   try { let r = sessionStorage.getItem("kiosk-resume"); if (r) { sessionStorage.removeItem("kiosk-resume"); startP = parseInt(r.split(",")[0], 10); startS = parseInt(r.split(",")[1], 10) || 0; } } catch (e) {}   // po przeładowaniu z błędu: ten sam produkt i scenariusz
   startP = isNaN(startP) ? 0 : Math.max(0, Math.min(PRODUCTS.length - 1, startP));
   play(startP, Math.max(0, Math.min(PRODUCTS[startP].scenarios.length - 1, startS)));
-  window.KIOSK = { play: play, select: select, selectProduct: selectProduct, act: act, setRobot: setRobot, setCat: setCat, setHero: setHero, heroNow: function (kind) { if (hero) { hero.launch(kind); } }, heroState: function () { return hero ? hero.state : null; }, catAgain: function () { if (cat) { cat.again(); } }, catState: function () { return cat ? cat.state : null; }, setSpeed: setSpeed, products: PRODUCTS };
+  if (TEST) { selfTest(); }
+  window.KIOSK = { play: play, select: select, selectProduct: selectProduct, act: act, setRobot: CO.setRobot, setCat: CO.setCat, setHero: CO.setHero, heroNow: function (kind) { if (CO.hero()) { CO.hero().launch(kind); } }, heroState: function () { return CO.hero() ? CO.hero().state : null; }, catAgain: function () { if (CO.cat()) { CO.cat().again(); } }, catState: function () { return CO.cat() ? CO.cat().state : null; }, setSpeed: setSpeed, products: PRODUCTS };
 })();
