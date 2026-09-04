@@ -1,7 +1,7 @@
-/* ROBOT - voxel (3D block) robots rendered smoothly on a full-resolution canvas + a "peek-a-boo" director for the kiosk.
+/* ROBOT - voxel (3D block) robots rendered smoothly on a full-resolution canvas + a stage director for the kiosk (the robot stays in front of the cards).
    Loaded by kiosk-flow.html; kiosk-core.js turns the robot and the cat on from the settings popover.
    API:  Robot.create({ canvas, model, unit })  -> renderer   (pose in CSS px, feet anchor; unit = CSS px per voxel)
-         Robot.kiosk({ renderer, stage, view, bubble, remarks, cardSelector, footOffset, speed }) -> director
+         Robot.kiosk({ renderer, stage, view, bubble, remarks, cardSelector, speed }) -> director
          (speed: optional () => number, the kiosk tempo multiplier; walking, waiting and hopping scale with it) */
 window.Robot = (function () {
   "use strict";
@@ -247,7 +247,7 @@ window.Robot = (function () {
     return { pose, bounds, unit: UNIT, model: opts.model || 'bot', resize, clear, animate, draw, headTop, WALK_YAW: MODEL.walkYaw || WALK_YAW, CAM_YAW };
   }
 
-  // ─── Kiosk director: peek-a-boo around the stage cards ───
+  // ─── Kiosk director: strolls in front of the stage cards ───
   const CLAIMS = new Map();      // card element -> director id, so two robots do not pick the same card
   let directorSeq = 0;
   function kiosk(opts) {
@@ -260,9 +260,7 @@ window.Robot = (function () {
     const SEL = opts.cardSelector || '.fl-node, .card, .dy-page, .pa-wave, .pa-script, .pa-docs';
     const WALK_PX = opts.walkSpeed || 170;       // CSS px per second
     const ENTER = opts.enterSide === 'right' ? 1 : -1;
-    const RISE_PX = 260;
-    const RW = R.bounds.w, RH = R.bounds.h;
-    const LEGS = opts.footOffset || RH * 0.3;   // px below the card edge for the feet while walking behind, so the legs stay visible
+    const RW = R.bounds.w;
     const tempo = typeof opts.speed === 'function' ? opts.speed : () => 1;
 
     const S = { cards: [], layer: 'front', product: null, remarkIx: 0, gen: null, action: null, bubbleUntil: 0, said: 0, jump: null, t: 0 };
@@ -277,7 +275,6 @@ window.Robot = (function () {
       });
       S.cards = list;
     }
-    function hideable(c) { return c.width > RW + 24 && c.height > RH + 16; }
     function free(c) { const who = CLAIMS.get(c.el); return !who || who === ME; }
     function claim(c) { release(); if (c) CLAIMS.set(c.el, ME); }
     function release() { for (const [el, who] of CLAIMS) if (who === ME) CLAIMS.delete(el); }
@@ -311,60 +308,24 @@ window.Robot = (function () {
       claim(target);
       yield move(target ? clamp(target.left + target.width * 0.5, RW, innerWidth - RW) : innerWidth * 0.5, ground());
       yield wave(remark(), 2.6);
+      // stays in front of the cards: strolls from card to card along the ground, remarks, hops, waits
       while (true) {
         scanCards();
-        const cards = S.cards.filter(hideable).filter(free);
-        if (!cards.length) { release(); yield move(rand(RW, innerWidth - RW), ground()); yield wave(remark(), 2.4); yield wait(1); continue; }
-        const c = pick(cards);
-        claim(c);
         const gy = ground();
-        const legsY = r => r.bottom + LEGS;       // behind a card: feet below its edge so the legs stay visible
-        const hidY = r => r.bottom - 6;           // fully hidden behind the card (only around the head-over-the-top peek)
-        // 1. walk in front to the right side of the card, then step behind it
-        yield move(c.right + RW * 0.55, gy);
-        yield layer('behind');
-        yield move(c.right - RW * 0.62, legsY(c));
-        yield wait(rand(0.5, 1.1));
-        // 2. peek: top (rise) or side (step out)
-        if (Math.random() < 0.55) {
-          const px = clamp(c.left + c.width * rand(0.3, 0.7), c.left + RW * 0.55, c.right - RW * 0.55);
-          yield move(px, legsY(c));
-          yield move(px, hidY(c), { walk: false, speed: RISE_PX });
-          yield move(px, c.top + RH * 0.62, { speed: RISE_PX, walk: false, face: 0 });
-          yield wave(remark(), 2.6);
-          yield move(px, hidY(c), { speed: RISE_PX, walk: false, face: 0 });
-          yield move(px, legsY(c), { walk: false, speed: RISE_PX });
+        const cards = S.cards.filter(free);
+        let x;
+        if (cards.length && Math.random() < 0.7) {
+          const c = pick(cards);
+          claim(c);
+          x = clamp(c.left + c.width * rand(0.25, 0.75), RW, innerWidth - RW);
         } else {
-          const roomR = innerWidth - c.right > RW * 0.8, roomL = c.left > RW * 0.8;
-          const side = roomR && roomL ? (Math.random() < 0.5 ? -1 : 1) : (roomL ? -1 : 1);
-          const inside = side > 0 ? c.right - RW * 0.62 : c.left + RW * 0.62;
-          const out = side > 0 ? c.right + RW * 0.18 : c.left - RW * 0.18;
-          yield move(inside, legsY(c));
-          yield move(out, legsY(c));
-          yield wave(remark(), 2.6);
-          yield move(inside, legsY(c));
+          release();
+          x = rand(RW * 1.2, innerWidth - RW * 1.2);
         }
-        yield wait(rand(0.4, 0.9));
-        // 3. sneak behind the row of cards to another one (legs visible under the edge), or come out front
-        const others = cards.filter(o => o !== c && free(o));
-        if (others.length && Math.random() < 0.5) {
-          const n = pick(others);
-          claim(n);
-          const nx = n.left + n.width * 0.5;
-          yield move(nx, legsY(n));
-          yield move(nx, hidY(n), { walk: false, speed: RISE_PX });
-          yield move(nx, n.top + RH * 0.62, { speed: RISE_PX, walk: false, face: 0 });
-          yield wave(remark(), 2.4);
-          yield move(nx, hidY(n), { speed: RISE_PX, walk: false, face: 0 });
-          yield move(nx, legsY(n), { walk: false, speed: RISE_PX });
-          yield move(n.right + RW * 0.55, legsY(n));
-        } else {
-          yield move(c.right + RW * 0.55, legsY(c));
-        }
-        yield layer('front');
-        yield move(pose.x, gy, { walk: false, speed: 120 });
-        if (Math.random() < 0.5) { yield move(rand(RW * 1.2, innerWidth - RW * 1.2), gy); yield hop(); }
-        yield wait(rand(0.3, 0.8));
+        yield move(x, gy);
+        if (Math.random() < 0.35) yield hop();
+        yield wave(remark(), 2.6);
+        yield wait(rand(0.8, 2.2));
       }
     }
 

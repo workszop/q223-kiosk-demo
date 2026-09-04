@@ -551,7 +551,7 @@
     companionToggle("robot", refs.robotBtn, canvas, bubble, robotOn);
     if (robotOn && !robot && window.Robot && canvas) {
       let renderer = window.Robot.create({ canvas: canvas, smooth: true, unit: 9 });   // wersja wygładzona (pełna rozdzielczość, antyaliasing)
-      robot = { renderer: renderer, director: window.Robot.kiosk({ renderer: renderer, stage: "#stage", view: "#kView", bubble: bubble, remarks: ROBOT_REMARKS, footOffset: 44, speed: function () { return speed; } }) };
+      robot = { renderer: renderer, director: window.Robot.kiosk({ renderer: renderer, stage: "#stage", view: "#kView", bubble: bubble, remarks: ROBOT_REMARKS, speed: function () { return speed; } }) };
     }
     if (robot) { robot.renderer.pose.visible = robotOn; if (robotOn) { robot.renderer.resize(); robot.director.restart(); } }
   }
