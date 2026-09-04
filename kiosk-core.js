@@ -562,6 +562,7 @@
   function makeCat(renderer, canvas, bubble) {
     let pose = renderer.pose, C = { active: false, mode: null, product: null, t: 0, path: [], seg: 0, meowAt: 0, meowed: false, startAt: 0, bubbleUntil: 0, followUntil: 0, leaving: false, idleT: 0, stretchUntil: 0, lastYaw: 0 };
     const FOLLOW_CHANCE = 0.22, FOLLOW_GAP = 1.3;   // szansa na tryb "za robotem" i odstęp od robota (w szerokościach kota)
+    const LEFTWARD_CHANCE = 0.25;                     // szansa, że trasa po górze idzie z prawej do lewej
     let SEL = ".fl-node, .card, .dy-page, .pa-wave, .pa-script, .pa-docs, .km-mail, .km-analysis, .km-lane, .gw-item, .oc-row, .kr-out";
     let SPEED = 150, JUMP_SPEED = 260, W = renderer.bounds.w;
     function topRow() {
@@ -577,18 +578,20 @@
     function plan() {
       let row = topRow();
       if (!row.length) { return false; }
+      let dir = Math.random() < LEFTWARD_CHANCE ? -1 : 1, cards = dir > 0 ? row : row.slice().reverse();
       let y = row[0].top - 2, path = [];
-      path.push({ x: -W, y: y, walk: true, speed: SPEED });
-      row.forEach(function (c, k) {
-        path.push({ x: c.right - W * 0.25, y: c.top - 2, walk: true, speed: SPEED });
-        if (k < row.length - 1) { path.push({ x: row[k + 1].left + W * 0.25, y: row[k + 1].top - 2, walk: false, speed: JUMP_SPEED, jump: true }); }
+      C.dir = dir;
+      path.push({ x: dir > 0 ? -W : innerWidth + W, y: y, walk: true, speed: SPEED });
+      cards.forEach(function (c, k) {
+        path.push({ x: dir > 0 ? c.right - W * 0.25 : c.left + W * 0.25, y: c.top - 2, walk: true, speed: SPEED });
+        if (k < cards.length - 1) { let n = cards[k + 1]; path.push({ x: dir > 0 ? n.left + W * 0.25 : n.right - W * 0.25, y: n.top - 2, walk: false, speed: JUMP_SPEED, jump: true }); }
       });
-      path.push({ x: innerWidth + W, y: y, walk: true, speed: SPEED });
+      path.push({ x: dir > 0 ? innerWidth + W : -W, y: y, walk: true, speed: SPEED });
       // czasem zatrzymuje się na jednej z kart: odwraca się do widza i miauczy albo przeciąga się (bokiem) i mruczy
       if (Math.random() < 0.7) {
         let c = row[Math.floor(Math.random() * row.length)];
         let px = c.left + (c.right - c.left) * (0.3 + Math.random() * 0.4);
-        let ix = path.findIndex(function (pt) { return !pt.jump && pt.x >= px; });
+        let ix = path.findIndex(function (pt) { return !pt.jump && (dir > 0 ? pt.x >= px : pt.x <= px); });
         let stretch = Math.random() < 0.45;
         if (ix > 0) { path.splice(ix, 0, { x: px, y: c.top - 2, walk: true, speed: SPEED }, { x: px, y: c.top - 2, stop: stretch ? 3 + Math.random() * 1.2 : 1.6 + Math.random() * 1.2, meow: !stretch, stretch: stretch }); }
       }
@@ -613,7 +616,7 @@
         let sp = C.path[C.seg];
         C.stopT += dt * speed;
         stretching = !!sp.stretch;
-        yaw = stretching ? renderer.WALK_YAW - renderer.CAM_YAW : 0;   // przeciąganie bokiem, miauczenie twarzą do widza
+        yaw = stretching ? (C.dir || 1) * renderer.WALK_YAW - renderer.CAM_YAW : 0;   // przeciąganie bokiem, miauczenie twarzą do widza
         if (sp.meow && !sp.said && C.stopT > 0.5) { sp.said = true; bubble.textContent = "Miau."; bubble.classList.add("on"); C.bubbleUntil = C.t + 1.6; }
         if (sp.stretch && !sp.said && C.stopT > 1.4) { sp.said = true; bubble.textContent = "Mrrr."; bubble.classList.add("on"); C.bubbleUntil = C.t + 1.4; }
         if (C.stopT >= sp.stop) { C.stopT = 0; C.seg += 1; if (C.seg >= C.path.length) { C.active = false; } }
@@ -626,12 +629,12 @@
         } else { pose.lift = 0; }
         if (d <= step) { pose.x = seg.x; pose.y = seg.y; C.seg += 1; if (C.seg >= C.path.length) { C.active = false; pose.lift = 0; } }
         else { pose.x += dx / d * step; pose.y += dy / d * step; }
-        walking = !!seg.walk; yaw = renderer.WALK_YAW - renderer.CAM_YAW;
+        walking = !!seg.walk; yaw = (C.dir || 1) * renderer.WALK_YAW - renderer.CAM_YAW;
         let progress = C.seg / C.path.length;
         if (!C.meowed && progress >= C.meowAt) { C.meowed = true; bubble.textContent = Math.random() < 0.7 ? "Miau." : "Mrrr."; bubble.classList.add("on"); C.bubbleUntil = C.t + 1.6; }
       }
       renderer.animate(dt, { walking: walking, waving: false, stretching: stretching, airborne: pose.lift > 0, yawTarget: yaw });
-      if (C.bubbleUntil && C.t > C.bubbleUntil) { bubble.classList.remove("on"); C.bubbleUntil = 0; }
+      if (C.bubbleUntil && (C.t > C.bubbleUntil || !C.active)) { hideBubble(); }   // dymek nie przeżywa kota (zmiana sceny, resize, koniec trasy)
       let phase = !C.active ? "idle" : stretching ? "stretch" : C.mode === "follow" ? (walking ? "follow" : "wait") : (C.path[C.seg] && C.path[C.seg].stop ? "stop" : "walk");
       st.setAttribute("data-cat", phase + (C.active ? ":" + Math.round(pose.x) + "," + Math.round(pose.y) : ""));
     }
@@ -673,12 +676,17 @@
       renderer.clear();
       if (C.active) {
         renderer.draw(null);
-        if (C.bubbleUntil) { let h = renderer.headTop(); bubble.style.left = Math.min(Math.max(h[0], 80), innerWidth - 80) + "px"; bubble.style.top = Math.max(h[1], 40) + "px"; }
+        if (C.bubbleUntil) {
+          let h = renderer.headTop();
+          if (h[0] < W * 0.5 || h[0] > innerWidth - W * 0.5) { hideBubble(); }   // kot poza ekranem: dymek znika zamiast wisieć przy krawędzi
+          else { bubble.style.left = Math.min(Math.max(h[0], 80), innerWidth - 80) + "px"; bubble.style.top = Math.max(h[1], 40) + "px"; }
+        }
       }
     }
+    function hideBubble() { bubble.classList.remove("on"); C.bubbleUntil = 0; }
     let last = performance.now();
     function frame(now) { let dt = Math.min(0.05, (now - last) / 1000); last = now; if (catOn) { update(dt); render(); } requestAnimationFrame(frame); }
-    function again() { C.active = false; C.startAt = C.t + 0.5; }
+    function again() { C.active = false; hideBubble(); C.startAt = C.t + 0.5; }
     addEventListener("resize", function () { renderer.resize(); again(); });   // po zmianie rozmiaru kot planuje trasę od nowa
     requestAnimationFrame(frame);
     return { state: C, again: again, renderer: renderer };
@@ -692,7 +700,7 @@
       cat = makeCat(renderer, canvas, bubble);
     }
     if (cat && catOn) { cat.renderer.resize(); cat.state.product = null; }   // płótno mogło zostać zmierzone jako 0×0, gdy było ukryte
-    if (cat && !catOn) { cat.renderer.clear(); }
+    if (cat && !catOn) { cat.renderer.clear(); bubble.classList.remove("on"); cat.state.bubbleUntil = 0; }
   }
 
   // ─── Ustawienia: tempo (zapamiętane w localStorage) ───
