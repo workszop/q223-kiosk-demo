@@ -8,8 +8,10 @@
   const T = [0, 1.2, 2.2, 3.2, 4.2, 5.6, 7.0].map(function (x) { return Math.round(x * PHASE_MS); });
   const HOLD_MS = 6000;
   const IDLE_MS = 20000;
+  const FRAME_REF_W = 1920;   // szerokość kadru, przy której postaci mają skalę 1
   const LOGO = { dark: "quantica-logo-white.png", light: "quantica-logo-color.png" };
   const PRODUCTS = window.KIOSK_PRODUCTS;
+  const URLP = new URLSearchParams(location.search);
   const SVG = {
     prev: "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"m15 18-6-6 6-6\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></svg>",
     next: "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"m9 18 6-6-6-6\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></svg>",
@@ -30,22 +32,28 @@
 
   // ─── Zegar scenariusza: jedna kolejka dla silnika i widoków, czas bazowy (ms) skalowany tempem ───
   // Pauza zatrzymuje zegar, więc zatrzymuje też animacje widoków; zmiana tempa nie gubi kroków; spóźniony krok wykonuje się przy wznowieniu.
-  let queue = [], clock = 0, running = false, startAt = 0, rafId = 0;
+  // Jeden ticker rAF dla zegara scenariusza i wszystkich postaci (robot, kot, bohaterowie); dt w sekundach, ograniczone do 50 ms
+  const ticker = (function () {
+    let fns = [], last = performance.now();
+    const raf = URLP.get("tick") === "timer" ? function (fn) { setTimeout(function () { fn(performance.now()); }, 16); } : requestAnimationFrame;   // ?tick=timer: headless/ukryta karta, gdzie rAF nie tyka
+    function frame(t) { let dt = Math.min(0.05, (t - last) / 1000); last = t; for (let i = 0; i < fns.length; i += 1) { fns[i](dt); } raf(frame); }
+    raf(frame);
+    return { add: function (fn) { fns.push(fn); } };
+  })();
+  let queue = [], clock = 0, running = false, startAt = 0;
   function now() { return running ? clock + (Date.now() - startAt) * speed : clock; }
-  function at(ms, fn) { queue.push({ t: now() + ms, fn: fn }); }
+  function at(ms, fn) {   // kolejka trzymana posortowana przy wstawianiu (wpisów bywa kilkaset: pisanie znak po znaku)
+    let t = now() + ms, i = queue.length;
+    while (i > 0 && queue[i - 1].t > t) { i -= 1; }
+    queue.splice(i, 0, { t: t, fn: fn });
+  }
   function wait(fn, ms) { at(ms, fn); }
   function clear() { queue = []; }
-  function tick() {
-    rafId = 0;
+  ticker.add(function () {
     if (!running) { return; }
-    for (;;) {
-      queue.sort(function (a, b) { return a.t - b.t; });
-      if (!queue.length || queue[0].t > now()) { break; }
-      queue.shift().fn();
-    }
-    if (running) { rafId = requestAnimationFrame(tick); }
-  }
-  function startClock() { startAt = Date.now(); running = true; if (!rafId) { rafId = requestAnimationFrame(tick); } }
+    while (queue.length && queue[0].t <= now()) { queue.shift().fn(); }
+  });
+  function startClock() { startAt = Date.now(); running = true; }
   function stopClock() { clock = now(); running = false; }
 
   // ─── DOM refs (po renderze chrome) ───
@@ -53,17 +61,26 @@
 
   // ─── Helpers ───
   function el(id) { return document.getElementById(id); }
-  // Kadr 16:9 (.k-frame) w układzie ekranu: postaci liczą pozycje i rozmiar od niego, nie od okna; 1920 px szerokości to skala 1
-  const FRAME_REF_W = 1920;
-  function frameRect() { let r = refs.frame ? refs.frame.getBoundingClientRect() : { left: 0, top: 0, right: innerWidth, bottom: innerHeight, width: innerWidth, height: innerHeight }; return { left: r.left, top: r.top, right: r.right, bottom: r.bottom, width: r.width, height: r.height }; }
+  // Płótna i dymki postaci leżą wewnątrz .k-frame, więc liczą w układzie kadru: (0,0) to jego lewy górny róg, overflow kadru przycina je sam.
+  // Prostokąty kart z getBoundingClientRect() są w układzie okna - przelicza je frameOrigin(). Kadr mierzony raz na zmianę rozmiaru (syncFrame).
+  let frameCache = null, origin = { left: 0, top: 0 };
+  function measureFrame() {
+    let r = refs.frame ? refs.frame.getBoundingClientRect() : { left: 0, top: 0, width: innerWidth, height: innerHeight };
+    origin = { left: r.left, top: r.top };
+    return { left: 0, top: 0, right: r.width, bottom: r.height, width: r.width, height: r.height };
+  }
+  function frameRect() { return frameCache || measureFrame(); }
+  function frameOrigin() { return origin; }
   function scale() { return frameRect().width / FRAME_REF_W; }
   function px(v) { return v * scale(); }
-  function syncFrame() {   // szerokość kadru dla dymków (cqw) i przycięcie płócien postaci do kadru
-    let f = frameRect(), clip = "inset(" + Math.max(0, f.top) + "px " + Math.max(0, innerWidth - f.right) + "px " + Math.max(0, innerHeight - f.bottom) + "px " + Math.max(0, f.left) + "px)";
-    document.documentElement.style.setProperty("--frame-w", f.width + "px");
-    Array.prototype.forEach.call(document.querySelectorAll("#robot, #cat, #hero, .robot-wrap"), function (n) { n.style.clipPath = clip; });
-  }
+  function syncFrame() { frameCache = measureFrame(); }
   function q(sel) { return st.querySelector(sel); }
+  // Dymek nad głową postaci (układ kadru): wyśrodkowany nad punktem head, cały w kadrze, nie wyżej niż px(40) od góry
+  function placeBubble(bubble, head, dy) {
+    let fr = frameRect(), half = bubble.offsetWidth / 2 + px(12);
+    bubble.style.left = Math.min(Math.max(head[0], half), fr.width - half) + "px";
+    bubble.style.top = Math.max(head[1] + dy, px(40)) + "px";
+  }
   // Ikony z kiosk-icons.js (osadzone lokalnie): <i data-lucide="x" class="icon"> -> <svg class="icon">; tylko w podanym poddrzewie
   function icons(root) {
     Array.prototype.forEach.call((root || st).querySelectorAll("i[data-lucide]"), function (i) {
@@ -454,15 +471,15 @@
   }
   function progress(fromMs) {
     refs.progBar.setAttribute("aria-valuenow", String(Math.round(fromMs / total * 100)));
-    refs.prog.style.transition = "none"; refs.prog.style.width = (fromMs / total * 100) + "%";
+    refs.prog.style.transition = "none"; refs.prog.style.transform = "scaleX(" + (fromMs / total) + ")";
     void refs.prog.offsetWidth;
-    refs.prog.style.transition = "width " + ((total - fromMs) / speed) + "ms linear"; refs.prog.style.width = "100%";
+    refs.prog.style.transition = "transform " + ((total - fromMs) / speed) + "ms linear"; refs.prog.style.transform = "scaleX(1)";
   }
-  function freezeProgress() { let pct = Math.min(now(), total) / total * 100; refs.progBar.setAttribute("aria-valuenow", String(Math.round(pct))); refs.prog.style.transition = "none"; refs.prog.style.width = pct + "%"; }
+  function freezeProgress() { let pct = Math.min(now(), total) / total * 100; refs.progBar.setAttribute("aria-valuenow", String(Math.round(pct))); refs.prog.style.transition = "none"; refs.prog.style.transform = "scaleX(" + (pct / 100) + ")"; }
   function schedule() {
     let s = scenario();
     T.forEach(function (t, n) {
-      at(t, function () { view.step(n, s); refs.phase.textContent = stepText(n, s); st.setAttribute("data-phase", String(n + 1)); icons(refs.view); });
+      at(t, function () { view.step(n, s); refs.phase.textContent = stepText(n, s); st.setAttribute("data-phase", String(n + 1)); });
     });
     at(total, function () { setState("done"); if (!manual) { advanceAuto(); } });
     startClock();
@@ -568,7 +585,7 @@
     companionToggle("robot", refs.robotBtn, canvas, bubble, robotOn);
     if (robotOn && !robot && window.Robot && canvas) {
       let renderer = window.Robot.create({ canvas: canvas, smooth: true, unit: function () { return px(9); } });   // wersja wygładzona; rozmiar woksela skaluje się z kadrem
-      robot = { renderer: renderer, director: window.Robot.kiosk({ renderer: renderer, stage: "#stage", view: "#kView", bubble: bubble, remarks: ROBOT_REMARKS, speed: function () { return speed; }, walkSpeed: function () { return px(170); }, bounds: frameRect }) };
+      robot = { renderer: renderer, director: window.Robot.kiosk({ renderer: renderer, stage: "#stage", view: "#kView", bubble: bubble, remarks: ROBOT_REMARKS, speed: function () { return speed; }, walkSpeed: function () { return px(170); }, bounds: frameRect, origin: frameOrigin, scale: scale, ticker: ticker }) };
     }
     if (robot) { robot.renderer.pose.visible = robotOn; if (robotOn) { robot.renderer.resize(); robot.director.restart(); } }
   }
@@ -581,20 +598,20 @@
     const FOLLOW_CHANCE = 0.22, FOLLOW_GAP = 1.3;   // szansa na tryb "za robotem" i odstęp od robota (w szerokościach kota)
     const LEFTWARD_CHANCE = 0.25;                     // szansa, że trasa po górze idzie z prawej do lewej
     let SEL = ".fl-node, .card, .dy-page, .pa-wave, .pa-script, .pa-docs, .km-mail, .km-analysis, .km-lane, .gw-item, .oc-row, .kr-out";
-    let SPEED = 150, JUMP_SPEED = 260, W = renderer.bounds.w;   // prędkości w px/s przy skali 1; W = szerokość kota (odświeżana z kadrem)
-    function topRow() {
-      let view = document.getElementById("kView"), list = [];
-      view.querySelectorAll(SEL).forEach(function (e) { let r = e.getBoundingClientRect(); if (r.width > 60 && r.height > 60) { list.push(r); } });
+    let SPEED = 150, JUMP_SPEED = 260;   // prędkości w px/s przy skali 1
+    const bounds = renderer.bounds;      // rozmiar kota w px, odświeżany przez renderer.resize(); bounds.w = szerokość
+    function topRow() {   // górne krawędzie kart w układzie kadru; progi rozmiaru skalują się z kadrem jak same karty
+      let view = document.getElementById("kView"), o = frameOrigin(), list = [], min = px(60);
+      view.querySelectorAll(SEL).forEach(function (e) { let r = e.getBoundingClientRect(); if (r.width > min && r.height > min) { list.push({ left: r.left - o.left, right: r.right - o.left, top: r.top - o.top }); } });
       if (!list.length) { return []; }
-      let minTop = Math.min.apply(null, list.map(function (r) { return r.top; }));
-      let row = list.filter(function (r) { return r.top < minTop + 40; }).sort(function (a, b) { return a.left - b.left; });
+      let minTop = Math.min.apply(null, list.map(function (r) { return r.top; })), rowGap = px(40), mergeGap = px(10);
+      let row = list.filter(function (r) { return r.top < minTop + rowGap; }).sort(function (a, b) { return a.left - b.left; });
       let merged = [];
-      row.forEach(function (r) { let last = merged[merged.length - 1]; if (last && r.left < last.right + 10) { last.right = Math.max(last.right, r.right); } else { merged.push({ left: r.left, right: r.right, top: r.top }); } });
+      row.forEach(function (r) { let last = merged[merged.length - 1]; if (last && r.left < last.right + mergeGap) { last.right = Math.max(last.right, r.right); } else { merged.push({ left: r.left, right: r.right, top: r.top }); } });
       return merged;
     }
     function plan() {
-      let row = topRow(), fr = frameRect();
-      W = renderer.bounds.w;
+      let row = topRow(), fr = frameRect(), W = bounds.w;
       if (!row.length) { return false; }
       let dir = Math.random() < LEFTWARD_CHANCE ? -1 : 1, cards = dir > 0 ? row : row.slice().reverse();
       let y = row[0].top - 2, path = [];
@@ -659,18 +676,17 @@
     // ── tryb "za robotem": kot wchodzi z brzegu na poziom robota, trzyma się o krok za nim, w przerwach czasem się przeciąga, po chwili schodzi ze sceny
     function robotInFront() {
       if (!robotOn || !robot) { return false; }
-      let rp = robot.renderer.pose, fr = frameRect();
+      let rp = robot.renderer.pose, fr = frameRect(), W = bounds.w;
       return robot.director.state.layer === "front" && rp.x > fr.left + W && rp.x < fr.right - W;
     }
     function startFollow() {
-      let rp = robot.renderer.pose, fr = frameRect();
-      W = renderer.bounds.w;
+      let rp = robot.renderer.pose, fr = frameRect(), W = bounds.w;
       C.mode = "follow"; C.active = true; C.leaving = false; C.idleT = 0; C.stretchUntil = 0;
       C.followUntil = C.t + 9 + Math.random() * 6; C.meowed = false; C.meowAt = C.t + 1.5;
       pose.x = rp.x > fr.left + fr.width / 2 ? fr.left - W : fr.right + W; pose.y = rp.y; pose.lift = 0;
     }
     function followStep(dt) {
-      let rp = robot.renderer.pose, out = { walking: false, stretching: false, yaw: 0 }, fr = frameRect();
+      let rp = robot.renderer.pose, out = { walking: false, stretching: false, yaw: 0 }, fr = frameRect(), W = bounds.w;
       if (!C.leaving && (C.t > C.followUntil || !robotOn || robot.director.state.layer !== "front")) { C.leaving = true; C.exitX = pose.x < fr.left + fr.width / 2 ? fr.left - W : fr.right + W; C.stretchUntil = 0; }
       let gap = W * FOLLOW_GAP, tx = C.leaving ? C.exitX : rp.x + (pose.x < rp.x ? -gap : gap), ty = C.leaving ? pose.y : rp.y;
       let dx = tx - pose.x, dy = ty - pose.y, d = Math.hypot(dx, dy), step = px(SPEED) * dt * speed;
@@ -692,22 +708,18 @@
       return out;
     }
     function render() {
-      renderer.clear();
-      if (C.active) {
-        renderer.draw(null);
-        if (C.bubbleUntil) {
-          let h = renderer.headTop(), fr = frameRect();
-          if (h[0] < fr.left + W * 0.5 || h[0] > fr.right - W * 0.5) { hideBubble(); }   // kot poza kadrem: dymek znika zamiast wisieć przy krawędzi
-          else { bubble.style.left = Math.min(Math.max(h[0], fr.left + 80), fr.right - 80) + "px"; bubble.style.top = Math.max(h[1], fr.top + 40) + "px"; }
-        }
+      if (!C.active) { if (C.drawn) { renderer.clear(); C.drawn = false; } return; }   // bezczynny kot nie czyści płótna co klatkę
+      renderer.clear(); renderer.draw(null); C.drawn = true;
+      if (C.bubbleUntil) {
+        let h = renderer.headTop(), fr = frameRect(), W = bounds.w;
+        if (h[0] < fr.left + W * 0.5 || h[0] > fr.right - W * 0.5) { hideBubble(); }   // kot poza kadrem: dymek znika zamiast wisieć przy krawędzi
+        else { placeBubble(bubble, h, 0); }
       }
     }
     function hideBubble() { bubble.classList.remove("on"); C.bubbleUntil = 0; }
-    let last = performance.now();
-    function frame(now) { let dt = Math.min(0.05, (now - last) / 1000); last = now; if (catOn) { update(dt); render(); } requestAnimationFrame(frame); }
     function again() { C.active = false; hideBubble(); C.startAt = C.t + 0.5; }
     addEventListener("resize", function () { renderer.resize(); again(); });   // po zmianie rozmiaru kot planuje trasę od nowa
-    requestAnimationFrame(frame);
+    ticker.add(function (dt) { if (catOn) { update(dt); render(); } });
     return { state: C, again: again, renderer: renderer };
   }
   function setCat(on) {
@@ -735,7 +747,8 @@
       ctx = R[kind].ctx;
       return R[kind];
     }
-    function color(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+    let colors = {};
+    function color(name) { let k = st.getAttribute("data-theme") + name; return colors[k] || (colors[k] = getComputedStyle(document.documentElement).getPropertyValue(name).trim()); }
     function launch(kind) {
       let r = renderer(kind), p = r.pose, fr = frameRect(), W = fr.width, Hh = fr.height, L = fr.left, T = fr.top, s = scale();
       r.resize();   // płótno mogło być ukryte (0×0) przy tworzeniu renderera lub zmianie rozmiaru
@@ -773,10 +786,10 @@
           H.pt += ds; input.yawTarget = 0; p.x = H.x0 + Math.sin(H.t * 3) * 6 * s;
           if (H.pt > 0.9) { H.phase = "swing"; H.pt = 0; H.L = Math.hypot(p.x - ax, p.y - ay); H.th0 = Math.atan2(p.x - ax, p.y - ay); }
         } else if (H.phase === "swing") {                                             // pendulum arc across the screen, then release
-          H.pt += ds; let T = 1.7, th = H.th0 * Math.cos(Math.PI * Math.min(1, H.pt / T));   // T here: swing duration (s)
+          H.pt += ds; let SWING = 1.7, th = H.th0 * Math.cos(Math.PI * Math.min(1, H.pt / SWING));   // SWING: czas huśtnięcia (s)
           p.x = ax + Math.sin(th) * H.L; p.y = ay + Math.cos(th) * H.L;
           input.yawTarget = H.dir * r.WALK_YAW - r.CAM_YAW; p.pitch = -th * 0.6 * H.dir;   // pochylony wzdłuż nici
-          if (H.pt >= T) { H.phase = "out"; H.vx = H.dir * 900 * s; H.vy = -700 * s; }
+          if (H.pt >= SWING) { H.phase = "out"; H.vx = H.dir * 900 * s; H.vy = -700 * s; }
         } else {                                                                      // ballistic exit
           input.pose = "fly"; H.vy += 1500 * s * ds; p.x += H.vx * ds; p.y += H.vy * ds;
           input.yawTarget = H.dir * r.WALK_YAW - r.CAM_YAW; p.pitch = 1.0;
@@ -807,7 +820,7 @@
             for (let i = 0; i < 12; i++) { H.dust.push({ x: f[0] + (Math.random() - 0.5) * 30 * s, y: f[1], vx: (Math.random() - 0.5) * 300 * s, vy: -Math.random() * 200 * s, r: (6 + Math.random() * 12) * s, a: 1 }); }
             for (let i = 0; i < 7; i++) {
               let ang = Math.PI * (0.05 + Math.random() * 0.9) * (Math.random() < 0.5 ? 1 : -1), len = (50 + Math.random() * 90) * s, pts = [[f[0], f[1]]], x = f[0], y = f[1];
-              for (let s = 1; s <= 3; s++) { x += Math.cos(ang) * len / 3; y += Math.sin(ang) * len / 3 * 0.35; ang += (Math.random() - 0.5) * 0.9; pts.push([x, y]); }
+              for (let j = 1; j <= 3; j++) { x += Math.cos(ang) * len / 3; y += Math.sin(ang) * len / 3 * 0.35; ang += (Math.random() - 0.5) * 0.9; pts.push([x, y]); }
               H.cracks.push({ pts: pts, a: 1 });
             }
           }
@@ -841,9 +854,9 @@
       })(t0);
     }
     function render() {
-      if (!ctx) { return; }
-      let r = R[H.kind]; if (r) { r.clear(); }
-      if (!H.active || !r) { return; }
+      let r = R[H.kind];
+      if (!H.active || !r) { if (H.drawn && r) { r.clear(); H.drawn = false; } return; }   // bezczynne płótno czyszczone raz, nie co klatkę
+      r.clear(); H.drawn = true;
       let p = r.pose;
       if (H.kind === "spider" && H.phase !== "out") {                                 // the thread, from the anchor to the hands above the head
         let h = r.headTop();
@@ -861,12 +874,10 @@
         ctx.restore();
       }
       r.draw(null);
-      if (H.bubbleUntil) { let h = r.headTop(), fr = frameRect(); bubble.style.left = Math.min(Math.max(h[0], fr.left + 120), fr.right - 120) + "px"; bubble.style.top = Math.max(h[1] - px(10), fr.top + 40) + "px"; }
+      if (H.bubbleUntil) { placeBubble(bubble, r.headTop(), -px(10)); }
     }
-    let last = performance.now();
-    function frame(now) { let dt = Math.min(0.05, (now - last) / 1000); last = now; if (heroOn) { update(dt); render(); } requestAnimationFrame(frame); }
-    addEventListener("resize", function () { Object.keys(R).forEach(function (k) { R[k].resize(); }); H.active = false; });
-    requestAnimationFrame(frame);
+    addEventListener("resize", function () { Object.keys(R).forEach(function (k) { R[k].resize(); }); H.active = false; hideBubble(); });   // przerwany przelot nie zostawia dymka
+    ticker.add(function (dt) { if (heroOn) { update(dt); render(); } });
     return { state: H, launch: launch, schedule: function (kind, delay) { H.pending = kind; H.launchAt = delay; H.t = 0; } };
   }
   function setHero(on) {
@@ -968,15 +979,14 @@
   st = document.getElementById("stage");
   st.className = "stage t-dark";
   st.innerHTML = chrome();
-  Array.prototype.forEach.call(document.querySelectorAll("#robot, #cat, #hero, .robot-wrap"), function (n) { st.appendChild(n); });   // warstwy postaci wewnątrz sceny: nagłówek, stopka i popover nad nimi
   icons(st);
   refs = { frame: el("kFrame"), logo: el("kLogo"), rail: el("kRail"), theme: el("kTheme"), pop: el("kPop"), speeds: el("kSpeeds"), robotBtn: el("kRobot"), catBtn: el("kCat"), heroBtn: el("kHero"), setBtn: st.querySelector("[data-act=settings]"), copy: el("kCopy"), name: el("kName"), tag: el("kTag"), phase: el("kPhase"), view: el("kView"), tabs: el("kTabs"), mode: el("kMode"), prog: el("kProg"), progBar: el("kProgBar"), idle: el("kIdle") };
+  Array.prototype.forEach.call(document.querySelectorAll("#robot, #cat, #hero, .robot-wrap"), function (n) { refs.frame.appendChild(n); });   // warstwy postaci wewnątrz kadru: wspólny kontekst z-index z nagłówkiem, stopką i popoverem; overflow kadru je przycina
   syncFrame(); addEventListener("resize", syncFrame);
   initTheme();
   listen();
   setSpeed(SPEEDS.indexOf(speed) >= 0 ? speed : 1);
   // Parametry URL nadpisują localStorage (profil przeglądarki kiosku bywa czyszczony; skrypt startowy może ustawić wszystko w adresie)
-  const URLP = new URLSearchParams(location.search);
   function pref(key, fallback) { let v = URLP.get(key); if (v !== null) { return v; } try { return localStorage.getItem("kiosk-" + key) || fallback; } catch (e) { return fallback; } }
   if (SPEEDS.indexOf(parseFloat(URLP.get("speed"))) >= 0) { setSpeed(parseFloat(URLP.get("speed"))); }
   if (URLP.get("theme") === "light" || URLP.get("theme") === "dark") { applyTheme(URLP.get("theme")); }

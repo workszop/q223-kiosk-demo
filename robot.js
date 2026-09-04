@@ -1,9 +1,11 @@
 /* ROBOT - voxel (3D block) robots rendered smoothly on a full-resolution canvas + a stage director for the kiosk (the robot stays in front of the cards).
    Loaded by index.html; kiosk-core.js turns the robot, the cat and the heroes on from the settings popover.
    API:  Robot.create({ canvas, model, unit })  -> renderer   (pose in CSS px, feet anchor; unit = CSS px per voxel, a number or a function re-read on resize())
-         Robot.kiosk({ renderer, stage, view, bubble, remarks, cardSelector, speed, walkSpeed, bounds }) -> director
+         Robot.kiosk({ renderer, stage, view, bubble, remarks, cardSelector, speed, walkSpeed, bounds, ticker }) -> director
          (speed: optional () => number, the kiosk tempo multiplier; walking, waiting and hopping scale with it;
-          walkSpeed: px/s or () => px/s; bounds: () => {left, top, right, bottom, width, height} of the stage area, default the viewport) */
+          walkSpeed: px/s or () => px/s; bounds: () => {left, top, right, bottom, width, height} of the stage area in canvas space, default the viewport;
+          origin: () => {left, top} viewport offset of the canvas (card rects are translated by it); scale: () => stage scale for the card-size threshold;
+          ticker: optional { add(fn(dt)) } shared frame loop; without it the director runs its own requestAnimationFrame loop) */
 window.Robot = (function () {
   "use strict";
   // ─── Constants ───
@@ -177,8 +179,8 @@ window.Robot = (function () {
   function create(opts) {
     const canvas = opts.canvas, ctx = canvas.getContext('2d');
     const DPR = window.devicePixelRatio || 1;
-    const unitOf = typeof opts.unit === 'function' ? opts.unit : () => opts.unit || 9;
-    let UNIT = unitOf();
+    const unitOf = typeof opts.unit === 'function' ? opts.unit : () => opts.unit || 9;   // unit: CSS px per voxel, re-read on resize
+    let unit = unitOf();
     const MODEL = (MODELS[opts.model] || MODELS.bot)();
     const css = getComputedStyle(document.documentElement);
     const PAL = {};
@@ -212,8 +214,8 @@ window.Robot = (function () {
     })();
     const bounds = {};
     function measure() {
-      UNIT = unitOf();
-      Object.assign(bounds, { left: base.x0 * UNIT, right: base.x1 * UNIT, top: base.y0 * UNIT, bottom: base.y1 * UNIT, w: (base.x1 - base.x0) * UNIT, h: (base.y1 - base.y0) * UNIT });
+      unit = unitOf();
+      Object.assign(bounds, { left: base.x0 * unit, right: base.x1 * unit, top: base.y0 * unit, bottom: base.y1 * unit, w: (base.x1 - base.x0) * unit, h: (base.y1 - base.y0) * unit });
     }
     measure();
 
@@ -258,7 +260,7 @@ window.Robot = (function () {
       return out;
     }
 
-    // clips: array of {left, top, width, height, radius} in CSS px that occlude the robot (it is "behind" them)
+    // clips: array of {left, top, width, height, radius?} in CSS px that occlude the robot (it is "behind" them)
     function draw(clips) {
       if (!pose.visible) return;
       ctx.save();
@@ -272,7 +274,7 @@ window.Robot = (function () {
       if (pose.shadow) {
         const k = clamp(1 - pose.lift / 20, 0.35, 1);
         ctx.fillStyle = PAL.shadow; ctx.beginPath();
-        ctx.ellipse(ox, oy, MODEL.shadow * UNIT * k, MODEL.shadow * UNIT * SP * k, 0, 0, Math.PI * 2); ctx.fill();
+        ctx.ellipse(ox, oy, MODEL.shadow * unit * k, MODEL.shadow * unit * SP * k, 0, 0, Math.PI * 2); ctx.fill();
       }
       // voxels
       const cy = Math.cos(pose.yaw), sy = Math.sin(pose.yaw), cp = Math.cos(pose.pitch), sp2 = Math.sin(pose.pitch);
@@ -284,7 +286,7 @@ window.Robot = (function () {
         if (geo[angle]) return geo[angle];
         const ca = Math.cos(angle), sa = Math.sin(angle);
         const swing = (x, y, z) => [x, y * ca - z * sa, y * sa + z * ca];      // limb rotation around X
-        const offs = CORNERS.map(o => { const p = cam(...rot(...swing(...o))); return [p[0] * UNIT, p[1] * UNIT]; });
+        const offs = CORNERS.map(o => { const p = cam(...rot(...swing(...o))); return [p[0] * unit, p[1] * unit]; });
         const faces = FACES.map(f => {
           const w = rot(...swing(...f.n)), lum = w[0] * LIGHT[0] + w[1] * LIGHT[1] + w[2] * LIGHT[2];
           return { on: cam(...w)[2] > 0.001, level: levelOf(lum), c: f.c };
@@ -299,7 +301,7 @@ window.Robot = (function () {
         let c = v.c;
         if (c === 'eye' && pose.eyesClosed) c = 'eyeOff';
         if (c === 'tip') c = Math.floor(pose.t * 2) % 2 ? 'pink' : 'teal';
-        items.push({ x: ox + p[0] * UNIT, y: oy + p[1] * UNIT, d: p[2], c, g: geometry(v.rot || 0) });
+        items.push({ x: ox + p[0] * unit, y: oy + p[1] * unit, d: p[2], c, g: geometry(v.rot || 0) });
       }
       items.sort((a, b) => a.d - b.d);
       for (const it of items) for (const f of it.g.faces) {
@@ -315,17 +317,17 @@ window.Robot = (function () {
       ctx.restore();
     }
 
-    function headTop() { const p = cam(0, MODEL.height + 2 + pose.lift, 0); return [pose.x + p[0] * UNIT, pose.y + p[1] * UNIT]; }
+    function headTop() { const p = cam(0, MODEL.height + 2 + pose.lift, 0); return [pose.x + p[0] * unit, pose.y + p[1] * unit]; }
     // model-space point (voxel units, before yaw/pitch) -> screen CSS px, with the current yaw, pitch and lift applied
     function project(x, y, z) {
       const cy = Math.cos(pose.yaw), sy = Math.sin(pose.yaw), cp = Math.cos(pose.pitch), sp2 = Math.sin(pose.pitch), hc = MODEL.height * 0.5;
       const y1 = (y - hc) * cp - z * sp2, z1 = (y - hc) * sp2 + z * cp;
       const p = cam(x * cy + z1 * sy, y1 + hc + pose.lift, -x * sy + z1 * cy);
-      return [pose.x + p[0] * UNIT, pose.y + p[1] * UNIT];
+      return [pose.x + p[0] * unit, pose.y + p[1] * unit];
     }
 
     resize();
-    return { pose, bounds, get unit() { return UNIT; }, model: opts.model || 'bot', ctx, height: MODEL.height, resize, clear, animate, draw, headTop, project, WALK_YAW: MODEL.walkYaw || WALK_YAW, CAM_YAW };
+    return { pose, bounds, get unit() { return unit; }, model: opts.model || 'bot', ctx, height: MODEL.height, resize, clear, animate, draw, headTop, project, WALK_YAW: MODEL.walkYaw || WALK_YAW, CAM_YAW };
   }
 
   // ─── Kiosk director: strolls in front of the stage cards ───
@@ -341,19 +343,20 @@ window.Robot = (function () {
     const SEL = opts.cardSelector || '.fl-node, .card, .dy-page, .pa-wave, .pa-script, .pa-docs';
     const walkPx = typeof opts.walkSpeed === 'function' ? opts.walkSpeed : () => opts.walkSpeed || 170;   // CSS px per second
     const area = opts.bounds || (() => ({ left: 0, top: 0, right: innerWidth, bottom: innerHeight, width: innerWidth, height: innerHeight }));
+    const origin = opts.origin || (() => ({ left: 0, top: 0 }));   // viewport offset of the canvas: card rects are translated into canvas space
+    const scaleOf = typeof opts.scale === 'function' ? opts.scale : () => 1;   // stage scale; the card-size threshold scales with it
     const ENTER = opts.enterSide === 'right' ? 1 : -1;
-    let RW = R.bounds.w;
+    const RB = R.bounds;   // robot size in px, refreshed in place by R.resize(); RB.w = width
     const tempo = typeof opts.speed === 'function' ? opts.speed : () => 1;
 
     const S = { cards: [], layer: 'front', product: null, remarkIx: 0, gen: null, action: null, bubbleUntil: 0, said: 0, jump: null, t: 0 };
 
     function scanCards() {
-      const list = [];
+      const list = [], o = origin(), min = 40 * scaleOf();
       viewEl.querySelectorAll(SEL).forEach(el => {
         const r = el.getBoundingClientRect();
-        if (r.width < 40 || r.height < 40) return;
-        const radius = parseFloat(getComputedStyle(el).borderTopLeftRadius) || 0;
-        list.push({ el, left: r.left, top: r.top, right: r.right, bottom: r.bottom, width: r.width, height: r.height, radius });
+        if (r.width < min || r.height < min) return;
+        list.push({ el, left: r.left - o.left, top: r.top - o.top, right: r.right - o.left, bottom: r.bottom - o.top, width: r.width, height: r.height });
       });
       S.cards = list;
     }
@@ -382,14 +385,13 @@ window.Robot = (function () {
     function* life() {
       scanCards();
       // enter from the left edge, in front of everything, along the lowest card bottom
-      RW = R.bounds.w;
       const ground = () => { const a = area(); return (S.cards.length ? Math.max(...S.cards.map(c => c.bottom)) : a.top + a.height * 0.7) + 4; };
       yield layer('front');
-      yield teleport(ENTER < 0 ? area().left - RW : area().right + RW, ground());
+      yield teleport(ENTER < 0 ? area().left - RB.w : area().right + RB.w, ground());
       const freeCards = S.cards.filter(free);
       let target = freeCards.length ? pick(freeCards) : null;
       claim(target);
-      { const a = area(); yield move(target ? clamp(target.left + target.width * 0.5, a.left + RW, a.right - RW) : a.left + a.width * 0.5, ground()); }
+      { const a = area(); yield move(target ? clamp(target.left + target.width * 0.5, a.left + RB.w, a.right - RB.w) : a.left + a.width * 0.5, ground()); }
       yield wave(remark(), 2.6);
       // stays in front of the cards: strolls from card to card along the ground, remarks, hops, waits
       while (true) {
@@ -400,10 +402,10 @@ window.Robot = (function () {
         if (cards.length && Math.random() < 0.7) {
           const c = pick(cards);
           claim(c);
-          x = clamp(c.left + c.width * rand(0.25, 0.75), a.left + RW, a.right - RW);
+          x = clamp(c.left + c.width * rand(0.25, 0.75), a.left + RB.w, a.right - RB.w);
         } else {
           release();
-          x = rand(a.left + RW * 1.2, a.right - RW * 1.2);
+          x = rand(a.left + RB.w * 1.2, a.right - RB.w * 1.2);
         }
         yield move(x, gy);
         if (Math.random() < 0.35) yield hop();
@@ -461,15 +463,11 @@ window.Robot = (function () {
       if (bubble && S.bubbleUntil) { const [hx, hy] = R.headTop(), half = bubble.offsetWidth / 2 + 12, a = area(); bubble.style.left = clamp(hx, a.left + half, a.right - half) + 'px'; bubble.style.top = Math.max(hy, a.top + 40) + 'px'; }
     }
 
-    let last = performance.now();
-    function frame(now) {
-      const dt = Math.min(0.05, (now - last) / 1000); last = now;
-      if (pose.visible) { update(dt); render(dt); }   // switched off: no card scanning, no drawing
-      requestAnimationFrame(frame);
-    }
+    function step(dt) { if (pose.visible) { update(dt); render(dt); } }   // switched off: no card scanning, no drawing
     addEventListener('resize', () => { R.resize(); restart(); });
     restart();
-    requestAnimationFrame(frame);
+    if (opts.ticker) opts.ticker.add(step);   // shared rAF loop from the host
+    else { let last = performance.now(); (function frame(now) { step(Math.min(0.05, (now - last) / 1000)); last = now; requestAnimationFrame(frame); })(last); }
     return { state: S, restart };
   }
 

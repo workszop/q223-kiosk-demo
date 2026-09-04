@@ -228,7 +228,7 @@ button { font: inherit; }
 .k-prog-row { display: grid; grid-template-columns: auto minmax(8cqw, 1fr) auto; align-items: center; gap: 1em; }
 .k-mode, .k-idle { color: var(--st-fg); font-family: var(--font-mono); font-size: 0.7cqw; font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; }
 .k-prog { height: 0.36cqw; overflow: hidden; border-radius: 999px; background: var(--k-prog-bg); }
-.k-prog i { display: block; width: 0; height: 100%; border-radius: inherit; background: var(--quantica-pink); }
+.k-prog i { display: block; width: 100%; height: 100%; border-radius: inherit; background: var(--quantica-pink); transform: scaleX(0); transform-origin: left center; }   /* transform zamiast width: bez przeliczania układu w każdej klatce */
 .k-idle { min-width: 15ch; text-align: right; opacity: 0; transition: opacity 420ms; }
 .k-idle b { color: var(--quantica-pink); }
 .stage[data-mode="manual"] .k-idle { opacity: 1; }
@@ -963,11 +963,12 @@ button { font: inherit; }
 }
 
 /* ─── Robot i kot (robot.js) na scenie ─── */
-#robot { position: fixed; inset: 0; width: 100vw; height: 100vh; z-index: 3; pointer-events: none; image-rendering: auto; }
+/* Płótna i dymki leżą w .k-frame (współrzędne kadru, przycięcie przez overflow kadru, jeden kontekst z-index z nagłówkiem, stopką i popoverem) */
+#robot { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 3; pointer-events: none; image-rendering: auto; }
 #robot[hidden] { display: none; }
-.robot-wrap { position: fixed; left: 0; top: 0; width: var(--frame-w, 100vw); height: 100vh; container-type: inline-size; pointer-events: none; z-index: 4; }   /* szerokość kadru: dymki skalują się jak reszta */
+.robot-wrap { position: absolute; inset: 0; pointer-events: none; z-index: 4; }
 .robot-bubble {
-  position: fixed;
+  position: absolute;
   left: 0;
   top: 0;
   z-index: 4;
@@ -988,9 +989,9 @@ button { font: inherit; }
 .robot-bubble::after { content: ""; position: absolute; left: 50%; bottom: -0.45cqw; width: 0.9cqw; height: 0.9cqw; background: var(--robot-bubble-bg); transform: translateX(-50%) rotate(45deg); }
 .robot-bubble.on { opacity: 1; }
 .robot-bubble.off { display: none; }
-#cat { position: fixed; inset: 0; width: 100vw; height: 100vh; z-index: 7; pointer-events: none; image-rendering: auto; }   /* kot chodzi przed tytułem i paskami (z 6), pod popoverem (z 30) */
+#cat { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 7; pointer-events: none; image-rendering: auto; }   /* kot chodzi przed tytułem i paskami (z 6), pod popoverem (z 30) */
 .robot-wrap.cat-wrap { z-index: 8; }
-#hero { position: fixed; inset: 0; width: 100vw; height: 100vh; z-index: 9; pointer-events: none; image-rendering: auto; }   /* bohaterowie (easter eggi) nad wszystkim poza popoverem */
+#hero { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 9; pointer-events: none; image-rendering: auto; }   /* bohaterowie (easter eggi) nad wszystkim poza popoverem */
 #hero[hidden] { display: none; }
 .robot-wrap.hero-wrap { z-index: 10; }
 .robot-bubble.roar { font-size: 1.5cqw; font-weight: 700; letter-spacing: 0.06em; }
