@@ -9,7 +9,7 @@ window.Robot = (function () {
   const CAM_YAW = -0.28, CAM_PITCH = 0.42;
   const WALK_YAW = 0.8;                       // turn toward walking direction, relative to the camera
   const STEP_HZ = 2.1, LEG_AMP = 0.62, ARM_AMP = 0.5;
-  const TURN_SPEED = 5, BLEND_SPEED = 7;
+  const TURN_SPEED = 5, BLEND_SPEED = 7, STRETCH_SPEED = 2.2;
   const CY = Math.cos(CAM_YAW), SY = Math.sin(CAM_YAW);
   const CP = Math.cos(CAM_PITCH), SP = Math.sin(CAM_PITCH);
   const LIGHT = normalize([-0.45, 1.0, 0.8]);
@@ -31,7 +31,7 @@ window.Robot = (function () {
   // A part has a pivot [py, pz] for swinging around the X axis and a role that picks its animation:
   // legL / legR (walk cycle, opposite phase) · armL / armR (counter-swing, armR also waves) · tail (wag) · none
   function part(py, pz, role) { return { pivot: [py, pz], role: role || 'none', vox: new Map() }; }
-  function set(p, x, y, z, c) { p.vox.set(`${x},${y},${z}`, { x, y, z, c }); }
+  function set(p, x, y, z, c, ext) { p.vox.set(`${x},${y},${z}`, { x, y, z, c, ext }); }   // ext: voxel shows only once pose.stretchA exceeds it
   function box(p, x0, x1, y0, y1, z0, z1, c) {
     for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) for (let z = z0; z <= z1; z++) set(p, x, y, z, c);
   }
@@ -88,6 +88,9 @@ window.Robot = (function () {
     for (const k in legs) { const [x, z] = at[k]; box(legs[k], x, x, 1, 2, z, z, 'body'); set(legs[k], x, 0, z, 'dark'); }
     const tail = part(4.5, -3.5, 'tail');
     set(tail, 0, 4, -4, 'body'); set(tail, 0, 5, -4, 'body'); set(tail, 0, 6, -5, 'body'); set(tail, 0, 7, -5, 'dark');
+    set(tail, 0, 8, -6, 'body', 0.3); set(tail, 0, 9, -6, 'body', 0.55); set(tail, 0, 10, -7, 'dark', 0.8);   // the tail grows while stretching
+    // stretch: front legs reach forward, head dips, rear rises, tail up (angles blended in by pose.stretchA)
+    body.stretch = 0.22; head.stretch = -0.1; legs.legFL.stretch = legs.legFR.stretch = -0.55; tail.stretch = 0.5;
     return { parts: Object.assign({ body, head, tail }, legs), height: 11, shadow: 4.5, walkYaw: 1.1 };
   }
 
@@ -104,9 +107,10 @@ window.Robot = (function () {
     return [x1, -(y * CP - z1 * SP), y * SP + z1 * CP];
   }
   // swing a part around the X axis at its pivot (limbs rotate freely; the cube itself is rotated too, see geometry())
-  function addPart(out, p, angle) {
+  function addPart(out, p, angle, stretchA) {
     const [py, pz] = p.pivot, ca = Math.cos(angle), sa = Math.sin(angle);
     for (const v of p.vox.values()) {
+      if (v.ext && !(stretchA > v.ext)) continue;
       if (angle === 0) { out.push(v); continue; }
       const dy = v.y + 0.5 - py, dz = v.z + 0.5 - pz;
       out.push({ x: v.x, y: py + dy * ca - dz * sa - 0.5, z: pz + dy * sa + dz * ca - 0.5, c: v.c, rot: angle });
@@ -135,13 +139,14 @@ window.Robot = (function () {
     function levelOf(lum) { return Math.round((0.55 + 0.45 * (0.5 + 0.5 * clamp(lum, -1, 1))) * 100) / 100; }
 
     // pose: x, y = feet anchor in CSS px; lift = height above the anchor in voxels (jump)
-    const pose = { x: 0, y: 0, lift: 0, yaw: 0, walkBlend: 0, phase: 0, waveA: 0, airborne: false, eyesClosed: false, t: 0, nextBlink: 2, visible: true };
+    const pose = { x: 0, y: 0, lift: 0, yaw: 0, walkBlend: 0, phase: 0, waveA: 0, stretchA: 0, airborne: false, eyesClosed: false, t: 0, nextBlink: 2, visible: true };
     let W = 0, H = 0;
 
     // screen-space bounds of the standing robot (CSS px, relative to the feet anchor)
     const bounds = (() => {
       let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9;
       for (const p of Object.values(MODEL.parts)) for (const v of p.vox.values()) for (const o of CORNERS) {
+        if (v.ext) continue;   // stretch-only voxels do not count toward the standing size
         const q = cam(v.x + 0.5 + o[0], v.y + 0.5 + o[1], v.z + 0.5 + o[2]);
         x0 = Math.min(x0, q[0]); x1 = Math.max(x1, q[0]); y0 = Math.min(y0, q[1]); y1 = Math.max(y1, q[1]);
       }
@@ -155,13 +160,14 @@ window.Robot = (function () {
     }
     function clear() { ctx.clearRect(0, 0, W, H); }
 
-    // advance animation blends; input = { walking, waving, airborne, yawTarget }
+    // advance animation blends; input = { walking, waving, stretching, airborne, yawTarget }
     function animate(dt, input) {
       pose.t += dt;
       pose.yaw += (input.yawTarget - pose.yaw) * Math.min(1, TURN_SPEED * dt);
       pose.walkBlend = clamp(pose.walkBlend + (input.walking ? 1 : -1) * BLEND_SPEED * dt, 0, 1);
       if (input.walking || pose.walkBlend > 0) pose.phase += dt * STEP_HZ * Math.PI * 2;
       pose.waveA = clamp(pose.waveA + (input.waving ? 1 : -1) * BLEND_SPEED * dt, 0, 1);
+      pose.stretchA = clamp(pose.stretchA + (input.stretching ? 1 : -1) * STRETCH_SPEED * dt, 0, 1);
       pose.airborne = !!input.airborne;
       if (pose.t > pose.nextBlink) { pose.eyesClosed = !pose.eyesClosed; pose.nextBlink = pose.t + (pose.eyesClosed ? 0.12 : rand(2.2, 4.5)); }
     }
@@ -172,8 +178,12 @@ window.Robot = (function () {
       if (pose.airborne) { legL = legR = 0.55; armL = armR = -1.3; }
       if (pose.waveA > 0) armR = -(2.5 + Math.sin(pose.t * 14) * 0.35) * pose.waveA;
       const tail = Math.sin(pose.t * 4) * 0.35 + pose.waveA * 0.6 + (pose.airborne ? 0.5 : 0);
-      const angles = { legL, legR, armL, armR, tail, none: 0 };
-      for (const p of Object.values(MODEL.parts)) addPart(out, p, angles[p.role] || 0);
+      const angles = { legL, legR, armL, armR, tail, none: 0 }, s = pose.stretchA;
+      for (const p of Object.values(MODEL.parts)) {
+        let a = angles[p.role] || 0;
+        if (s > 0 && p.stretch !== undefined) a = a * (1 - s) + p.stretch * s;
+        addPart(out, p, a, s);
+      }
       return out;
     }
 
@@ -207,7 +217,7 @@ window.Robot = (function () {
         });
         return (geo[angle] = { offs, faces });
       }
-      const bob = pose.walkBlend * (Math.abs(Math.sin(pose.phase)) - 0.5) * 0.5;
+      const bob = pose.walkBlend * (Math.abs(Math.sin(pose.phase)) - 0.5) * 0.5 - pose.stretchA * 0.4;   // stretching: chest sinks a little
       const items = [];
       for (const v of buildPose()) {
         const w = rot(v.x + 0.5, v.y + 0.5, v.z + 0.5);

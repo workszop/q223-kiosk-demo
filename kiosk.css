@@ -977,7 +977,8 @@ button { font: inherit; }
 .robot-bubble::after { content: ""; position: absolute; left: 50%; bottom: -0.45cqw; width: 0.9cqw; height: 0.9cqw; background: var(--robot-bubble-bg); transform: translateX(-50%) rotate(45deg); }
 .robot-bubble.on { opacity: 1; }
 .robot-bubble.off { display: none; }
-#cat { position: fixed; inset: 0; width: 100vw; height: 100vh; z-index: 5; pointer-events: none; image-rendering: auto; }
+#cat { position: fixed; inset: 0; width: 100vw; height: 100vh; z-index: 7; pointer-events: none; image-rendering: auto; }   /* kot chodzi przed tytułem i paskami (z 6), pod popoverem (z 30) */
+.robot-wrap.cat-wrap { z-index: 8; }
 #cat[hidden] { display: none; }
 
 /* ─── Motyw jasny: ciemniejsze obrysy i tła ─── */

@@ -556,10 +556,12 @@
     if (robot) { robot.renderer.pose.visible = robotOn; if (robotOn) { robot.renderer.resize(); robot.director.restart(); } }
   }
 
-  // ─── Kot (robot.js, model "cat"): raz na symulację przechodzi po górnych krawędziach kart, skacze nad przerwami, raz miauczy ───
+  // ─── Kot (robot.js, model "cat"): raz na symulację przechodzi po górnych krawędziach kart (skacze nad przerwami, miauczy, czasem się przeciąga);
+  //     rzadko, gdy robot stoi z przodu sceny, zamiast tego wchodzi na scenę i przez chwilę chodzi za robotem ───
   let cat = null, catOn = false;
   function makeCat(renderer, canvas, bubble) {
-    let pose = renderer.pose, C = { active: false, product: null, t: 0, path: [], seg: 0, meowAt: 0, meowed: false, startAt: 0, bubbleUntil: 0 };
+    let pose = renderer.pose, C = { active: false, mode: null, product: null, t: 0, path: [], seg: 0, meowAt: 0, meowed: false, startAt: 0, bubbleUntil: 0, followUntil: 0, leaving: false, idleT: 0, stretchUntil: 0, lastYaw: 0 };
+    const FOLLOW_CHANCE = 0.22, FOLLOW_GAP = 1.3;   // szansa na tryb "za robotem" i odstęp od robota (w szerokościach kota)
     let SEL = ".fl-node, .card, .dy-page, .pa-wave, .pa-script, .pa-docs, .km-mail, .km-analysis, .km-lane, .gw-item, .oc-row, .kr-out";
     let SPEED = 150, JUMP_SPEED = 260, W = renderer.bounds.w;
     function topRow() {
@@ -582,12 +584,13 @@
         if (k < row.length - 1) { path.push({ x: row[k + 1].left + W * 0.25, y: row[k + 1].top - 2, walk: false, speed: JUMP_SPEED, jump: true }); }
       });
       path.push({ x: innerWidth + W, y: y, walk: true, speed: SPEED });
-      // czasem zatrzymuje się na jednej z kart, odwraca do widza i miauczy
+      // czasem zatrzymuje się na jednej z kart: odwraca się do widza i miauczy albo przeciąga się (bokiem) i mruczy
       if (Math.random() < 0.7) {
         let c = row[Math.floor(Math.random() * row.length)];
         let px = c.left + (c.right - c.left) * (0.3 + Math.random() * 0.4);
         let ix = path.findIndex(function (pt) { return !pt.jump && pt.x >= px; });
-        if (ix > 0) { path.splice(ix, 0, { x: px, y: c.top - 2, walk: true, speed: SPEED }, { x: px, y: c.top - 2, stop: 1.6 + Math.random() * 1.2, meow: true }); }
+        let stretch = Math.random() < 0.45;
+        if (ix > 0) { path.splice(ix, 0, { x: px, y: c.top - 2, walk: true, speed: SPEED }, { x: px, y: c.top - 2, stop: stretch ? 3 + Math.random() * 1.2 : 1.6 + Math.random() * 1.2, meow: !stretch, stretch: stretch }); }
       }
       C.path = path; C.seg = 0; C.stopT = 0;
       pose.x = path[0].x; pose.y = path[0].y; pose.lift = 0;
@@ -598,12 +601,21 @@
       C.t += dt;
       let product = st.getAttribute("data-product");
       if (product !== C.product) { C.product = product; C.active = false; C.startAt = C.t + 2 + Math.random() * 5; }
-      if (!C.active && C.startAt && C.t >= C.startAt) { C.startAt = 0; if (plan()) { C.active = true; } }
-      let walking = false, yaw = 0;
-      if (C.active && C.path[C.seg].stop) {
+      if (!C.active && C.startAt && C.t >= C.startAt) {
+        C.startAt = 0;
+        if (robotInFront() && Math.random() < FOLLOW_CHANCE) { startFollow(); }
+        else if (plan()) { C.active = true; C.mode = "top"; }
+      }
+      let walking = false, stretching = false, yaw = 0;
+      if (C.active && C.mode === "follow") {
+        let r = followStep(dt); walking = r.walking; stretching = r.stretching; yaw = r.yaw;
+      } else if (C.active && C.path[C.seg].stop) {
         let sp = C.path[C.seg];
-        C.stopT += dt * speed; yaw = 0;   // twarzą do widza
+        C.stopT += dt * speed;
+        stretching = !!sp.stretch;
+        yaw = stretching ? renderer.WALK_YAW - renderer.CAM_YAW : 0;   // przeciąganie bokiem, miauczenie twarzą do widza
         if (sp.meow && !sp.said && C.stopT > 0.5) { sp.said = true; bubble.textContent = "Miau."; bubble.classList.add("on"); C.bubbleUntil = C.t + 1.6; }
+        if (sp.stretch && !sp.said && C.stopT > 1.4) { sp.said = true; bubble.textContent = "Mrrr."; bubble.classList.add("on"); C.bubbleUntil = C.t + 1.4; }
         if (C.stopT >= sp.stop) { C.stopT = 0; C.seg += 1; if (C.seg >= C.path.length) { C.active = false; } }
       } else if (C.active) {
         let seg = C.path[C.seg];
@@ -618,9 +630,44 @@
         let progress = C.seg / C.path.length;
         if (!C.meowed && progress >= C.meowAt) { C.meowed = true; bubble.textContent = Math.random() < 0.7 ? "Miau." : "Mrrr."; bubble.classList.add("on"); C.bubbleUntil = C.t + 1.6; }
       }
-      renderer.animate(dt, { walking: walking, waving: false, airborne: pose.lift > 0, yawTarget: yaw });
+      renderer.animate(dt, { walking: walking, waving: false, stretching: stretching, airborne: pose.lift > 0, yawTarget: yaw });
       if (C.bubbleUntil && C.t > C.bubbleUntil) { bubble.classList.remove("on"); C.bubbleUntil = 0; }
-      st.setAttribute("data-cat", C.active ? (C.path[C.seg] && C.path[C.seg].stop ? "stop:" : "walk:") + Math.round(pose.x) + "," + Math.round(pose.y) : "idle");
+      let phase = !C.active ? "idle" : stretching ? "stretch" : C.mode === "follow" ? (walking ? "follow" : "wait") : (C.path[C.seg] && C.path[C.seg].stop ? "stop" : "walk");
+      st.setAttribute("data-cat", phase + (C.active ? ":" + Math.round(pose.x) + "," + Math.round(pose.y) : ""));
+    }
+    // ── tryb "za robotem": kot wchodzi z brzegu na poziom robota, trzyma się o krok za nim, w przerwach czasem się przeciąga, po chwili schodzi ze sceny
+    function robotInFront() {
+      if (!robotOn || !robot) { return false; }
+      let rp = robot.renderer.pose;
+      return robot.director.state.layer === "front" && rp.x > W && rp.x < innerWidth - W;
+    }
+    function startFollow() {
+      let rp = robot.renderer.pose;
+      C.mode = "follow"; C.active = true; C.leaving = false; C.idleT = 0; C.stretchUntil = 0;
+      C.followUntil = C.t + 9 + Math.random() * 6; C.meowed = false; C.meowAt = C.t + 1.5;
+      pose.x = rp.x > innerWidth / 2 ? -W : innerWidth + W; pose.y = rp.y; pose.lift = 0;
+    }
+    function followStep(dt) {
+      let rp = robot.renderer.pose, out = { walking: false, stretching: false, yaw: 0 };
+      if (!C.leaving && (C.t > C.followUntil || !robotOn || robot.director.state.layer !== "front")) { C.leaving = true; C.exitX = pose.x < innerWidth / 2 ? -W : innerWidth + W; C.stretchUntil = 0; }
+      let gap = W * FOLLOW_GAP, tx = C.leaving ? C.exitX : rp.x + (pose.x < rp.x ? -gap : gap), ty = C.leaving ? pose.y : rp.y;
+      let dx = tx - pose.x, dy = ty - pose.y, d = Math.hypot(dx, dy), step = SPEED * dt * speed;
+      if (C.stretchUntil) {
+        out.stretching = C.t < C.stretchUntil; out.yaw = C.lastYaw;
+        if (!out.stretching) { C.stretchUntil = 0; }
+        return out;
+      }
+      if (d > 6) {
+        pose.x += dx / d * Math.min(step, d); pose.y += dy / d * Math.min(step, d);
+        out.walking = true; out.yaw = C.lastYaw = Math.sign(dx) * renderer.WALK_YAW - renderer.CAM_YAW; C.idleT = 0;
+        if (!C.meowed && C.t > C.meowAt) { C.meowed = true; bubble.textContent = "Miau."; bubble.classList.add("on"); C.bubbleUntil = C.t + 1.6; }
+      } else if (C.leaving) {
+        C.active = false; C.mode = null;
+      } else {
+        C.idleT += dt * speed; out.yaw = 0;   // czeka obok robota twarzą do widza
+        if (C.idleT > 1.2 && Math.random() < dt * speed * 0.35) { C.stretchUntil = C.t + 2.4 + Math.random(); }
+      }
+      return out;
     }
     function render() {
       renderer.clear();
