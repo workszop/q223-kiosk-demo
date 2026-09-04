@@ -113,6 +113,7 @@
       SPEEDS.map(function (v) { return "<button type=\"button\" data-speed=\"" + v + "\">" + v + "×</button>"; }).join("") + "</div></div>" +
       "<div class=\"k-row\"><span class=\"k-pop-t\">Robot</span><button class=\"k-toggle\" id=\"kRobot\" type=\"button\" aria-pressed=\"false\"><i></i><span>wyłączony</span></button></div>" +
       "<div class=\"k-row\"><span class=\"k-pop-t\">Kot</span><button class=\"k-toggle\" id=\"kCat\" type=\"button\" aria-pressed=\"false\"><i></i><span>wyłączony</span></button></div>" +
+      "<div class=\"k-row\"><span class=\"k-pop-t\">Bohaterowie</span><button class=\"k-toggle\" id=\"kHero\" type=\"button\" aria-pressed=\"false\"><i></i><span>wyłączony</span></button></div>" +
       "<div class=\"k-row\"><span class=\"k-pop-t\">Scenariusz</span><button class=\"k-pop-replay\" type=\"button\" data-act=\"replay\">" + SVG.replay + "od nowa</button></div></div>";
   }
   function renderTabs(p) {
@@ -477,6 +478,7 @@
     refs.phase.textContent = "";
     view.reset(s); st.setAttribute("data-phase", "0"); icons(refs.view);
     schedule();
+    heroTick();
   }
   // Tryb automatyczny: jeden scenariusz z każdej symulacji, w kolejnym obiegu następny scenariusz
   function advanceAuto() {
@@ -703,6 +705,147 @@
     if (cat && !catOn) { cat.renderer.clear(); bubble.classList.remove("on"); cat.state.bubbleUntil = 0; }
   }
 
+  // ─── Bohaterowie (easter eggi, robot.js modele spider/iron/hulk): co drugi scenariusz jeden z trzech przelatuje przez ekran ───
+  //     spider: zjeżdża na nici z góry, huśta się po łuku przez ekran i odlatuje; iron: przelatuje poziomo z dopalaczami;
+  //     hulk: spada z góry na dół sceny, wstrząs i kurz, po chwili wyskakuje w górę
+  const HERO_KINDS = ["spider", "iron", "hulk"], HERO_EVERY = 2;
+  let hero = null, heroOn = false, heroPlays = 0, heroIx = Math.floor(Math.random() * HERO_KINDS.length);
+  function makeHero(canvas) {
+    let R = {}, H = { active: false, kind: null, phase: "idle", t: 0, launchAt: 0, pending: null, dust: [], trail: [] };
+    let ctx = null;
+    function renderer(kind) {
+      if (!R[kind]) { R[kind] = window.Robot.create({ canvas: canvas, model: kind, smooth: true, unit: kind === "hulk" ? 12 : 9 }); R[kind].pose.shadow = false; }
+      ctx = R[kind].ctx;
+      return R[kind];
+    }
+    function color(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+    function launch(kind) {
+      let r = renderer(kind), p = r.pose, W = innerWidth, Hh = innerHeight;
+      r.resize();   // płótno mogło być ukryte (0×0) przy tworzeniu renderera lub zmianie rozmiaru
+      H.kind = kind; H.active = true; H.t = 0; H.dust = []; H.trail = []; H.phase = "in"; H.pose = p;
+      p.lift = 0; p.pitch = 0; p.yaw = 0; p.poseA = 0; p.airborne = false; p.visible = true;
+      if (kind === "spider") {
+        H.dir = Math.random() < 0.5 ? 1 : -1;
+        H.x0 = H.dir > 0 ? W * 0.12 : W * 0.88; H.y0 = Hh * 0.42;
+        H.anchor = [H.dir > 0 ? W * 0.55 : W * 0.45, -12];
+        p.x = H.x0; p.y = -r.height * r.unit - 20;
+      } else if (kind === "iron") {
+        H.dir = Math.random() < 0.5 ? 1 : -1;
+        H.y0 = Hh * (0.3 + Math.random() * 0.25);
+        p.x = H.dir > 0 ? -140 : W + 140; p.y = H.y0;
+      } else {
+        p.x = W * (0.2 + Math.random() * 0.6); p.y = -r.height * r.unit - 40;
+        H.vy = 0; H.ground = Hh - 18;
+      }
+    }
+    function update(dt) {
+      if (!H.active) {
+        if (H.launchAt && (H.t += dt) >= H.launchAt) { H.launchAt = 0; launch(H.pending); }
+        return;
+      }
+      let r = R[H.kind], p = r.pose, W = innerWidth, Hh = innerHeight, k = H.kind;
+      H.t += dt * speed; let ds = dt * speed;
+      let input = { walking: false, waving: false, airborne: false, yawTarget: 0, pose: null };
+      if (k === "spider") {
+        let ax = H.anchor[0], ay = H.anchor[1], hx = r.headTop();
+        input.pose = "hang";
+        if (H.phase === "in") {                                                       // drop on the thread to mid height
+          p.y = Math.min(H.y0, p.y + 520 * ds); input.yawTarget = 0;
+          if (p.y >= H.y0) { H.phase = "dangle"; H.pt = 0; }
+        } else if (H.phase === "dangle") {                                            // a moment facing the viewer
+          H.pt += ds; input.yawTarget = 0; p.x = H.x0 + Math.sin(H.t * 3) * 6;
+          if (H.pt > 0.9) { H.phase = "swing"; H.pt = 0; H.L = Math.hypot(p.x - ax, p.y - ay); H.th0 = Math.atan2(p.x - ax, p.y - ay); }
+        } else if (H.phase === "swing") {                                             // pendulum arc across the screen, then release
+          H.pt += ds; let T = 1.7, th = H.th0 * Math.cos(Math.PI * Math.min(1, H.pt / T));
+          p.x = ax + Math.sin(th) * H.L; p.y = ay + Math.cos(th) * H.L;
+          input.yawTarget = H.dir * r.WALK_YAW - r.CAM_YAW; p.pitch = -th * 0.6 * H.dir;   // pochylony wzdłuż nici
+          if (H.pt >= T) { H.phase = "out"; H.vx = H.dir * 900; H.vy = -700; }
+        } else {                                                                      // ballistic exit
+          input.pose = "fly"; H.vy += 1500 * ds; p.x += H.vx * ds; p.y += H.vy * ds;
+          input.yawTarget = H.dir * r.WALK_YAW - r.CAM_YAW; p.pitch = 1.0;
+          if (p.x < -200 || p.x > W + 200 || p.y > Hh + 200) { H.active = false; }
+        }
+      } else if (k === "iron") {
+        input.pose = "fly"; input.yawTarget = H.dir * r.WALK_YAW - r.CAM_YAW; p.pitch = 1.25;
+        p.x += H.dir * 820 * ds; p.y = H.y0 + Math.sin(H.t * 2.2) * 14;
+        H.trail.push({ x: p.x, y: p.y, a: 1 }); if (H.trail.length > 18) { H.trail.shift(); }
+        H.trail.forEach(function (q) { q.a -= ds * 2.2; });
+        if (p.x < -200 || p.x > W + 200) { H.active = false; }
+      } else {                                                                        // hulk
+        if (H.phase === "in") {
+          input.airborne = true; H.vy += 2600 * ds; p.y += H.vy * ds; input.yawTarget = 0;
+          if (p.y >= H.ground) {
+            p.y = H.ground; H.phase = "land"; H.pt = 0; shake(0.55);
+            for (let i = 0; i < 14; i++) { H.dust.push({ x: p.x + (Math.random() - 0.5) * 60, y: p.y, vx: (Math.random() - 0.5) * 260, vy: -Math.random() * 160, r: 8 + Math.random() * 14, a: 1 }); }
+          }
+        } else if (H.phase === "land") {
+          input.pose = "land"; input.yawTarget = 0; H.pt += ds;
+          if (H.pt > 1.6) { H.phase = "out"; H.vy = -2600; H.vx = (Math.random() - 0.5) * 300; }
+        } else {
+          input.airborne = true; H.vy += 1400 * ds; p.y += H.vy * ds; p.x += H.vx * ds; input.yawTarget = 0;
+          if (p.y < -r.height * r.unit - 60 || p.y > Hh + 300) { H.active = false; }
+        }
+        H.dust.forEach(function (d) { d.x += d.vx * ds; d.y += d.vy * ds; d.vy += 120 * ds; d.r += 30 * ds; d.a -= ds * 1.3; });
+        H.dust = H.dust.filter(function (d) { return d.a > 0; });
+      }
+      r.animate(dt, input);
+      H.phase = H.active ? H.phase : "idle";
+      st.setAttribute("data-hero", H.active ? k + ":" + H.phase + ":" + Math.round(p.x) + "," + Math.round(p.y) : "idle");
+    }
+    function shake(sec) {
+      let t0 = performance.now(), amp = 9;
+      (function step(now) {
+        let f = 1 - (now - t0) / (sec * 1000);
+        if (f <= 0) { refs.view.style.transform = ""; return; }
+        refs.view.style.transform = "translate(" + ((Math.random() - 0.5) * amp * f * 2).toFixed(1) + "px," + ((Math.random() - 0.5) * amp * f * 2).toFixed(1) + "px)";
+        requestAnimationFrame(step);
+      })(t0);
+    }
+    function render() {
+      if (!ctx) { return; }
+      let r = R[H.kind]; if (r) { r.clear(); }
+      if (!H.active || !r) { return; }
+      let p = r.pose;
+      if (H.kind === "spider" && H.phase !== "out") {                                 // the thread, from the anchor to the hands above the head
+        let h = r.headTop();
+        ctx.save(); ctx.strokeStyle = color("--hero-thread"); ctx.lineWidth = 1.5; ctx.beginPath();
+        ctx.moveTo(H.phase === "swing" ? H.anchor[0] : p.x, H.phase === "swing" ? H.anchor[1] : -12); ctx.lineTo(h[0], h[1] - 8); ctx.stroke(); ctx.restore();
+      }
+      if (H.kind === "iron") {                                                        // thruster trail behind the feet
+        ctx.save();
+        H.trail.forEach(function (q, i) { if (q.a <= 0) { return; } ctx.globalAlpha = q.a * 0.6; ctx.fillStyle = color("--hero-thrust"); ctx.beginPath(); ctx.arc(q.x - H.dir * 26, q.y - 6, 4 + (H.trail.length - i) * 0.9, 0, Math.PI * 2); ctx.fill(); });
+        ctx.restore();
+      }
+      if (H.kind === "hulk" && H.dust.length) {
+        ctx.save(); ctx.fillStyle = color("--hero-dust");
+        H.dust.forEach(function (d) { ctx.globalAlpha = Math.max(0, d.a) * 0.7; ctx.beginPath(); ctx.arc(d.x, d.y, d.r, 0, Math.PI * 2); ctx.fill(); });
+        ctx.restore();
+      }
+      r.draw(null);
+    }
+    let last = performance.now();
+    function frame(now) { let dt = Math.min(0.05, (now - last) / 1000); last = now; if (heroOn) { update(dt); render(); } requestAnimationFrame(frame); }
+    addEventListener("resize", function () { Object.keys(R).forEach(function (k) { R[k].resize(); }); H.active = false; });
+    requestAnimationFrame(frame);
+    return { state: H, launch: launch, schedule: function (kind, delay) { H.pending = kind; H.launchAt = delay; H.t = 0; } };
+  }
+  function setHero(on) {
+    heroOn = !!on;
+    let canvas = document.getElementById("hero");
+    companionToggle("hero", refs.heroBtn, canvas, null, heroOn);
+    if (heroOn && !hero && window.Robot && canvas) { hero = makeHero(canvas); }
+    if (hero && !heroOn) { hero.state.active = false; hero.state.launchAt = 0; refs.view.style.transform = ""; }
+  }
+  // wywoływane z play(): co drugi scenariusz planuje jednego bohatera (po kolei), kilka sekund po starcie
+  function heroTick() {
+    heroPlays += 1;
+    if (!heroOn || !hero) { return; }
+    hero.state.launchAt = 0;   // bohater w trakcie przelotu kończy go, tylko zaplanowany start przepada
+    if (heroPlays % HERO_EVERY !== 0) { return; }
+    let kind = HERO_KINDS[heroIx++ % HERO_KINDS.length];
+    hero.schedule(kind, 3 + Math.random() * 6);
+  }
+
   // ─── Ustawienia: tempo (zapamiętane w localStorage) ───
   function setSpeed(v) {
     let prevSpeed = speed;
@@ -738,6 +881,7 @@
     Array.prototype.forEach.call(refs.speeds.children, function (b) { b.addEventListener("click", function () { touch(); setSpeed(parseFloat(b.getAttribute("data-speed"))); }); });
     refs.robotBtn.addEventListener("click", function () { touch(); setRobot(!robotOn); });
     refs.catBtn.addEventListener("click", function () { touch(); setCat(!catOn); });
+    refs.heroBtn.addEventListener("click", function () { touch(); setHero(!heroOn); });
     st.addEventListener("pointerdown", function (e) { if (!refs.pop.hidden && !e.target.closest(".k-pop, [data-act=settings]")) { togglePop(false); } });
     Array.prototype.forEach.call(refs.rail.children, function (b) { b.addEventListener("click", function () { selectProduct(parseInt(b.getAttribute("data-p"), 10)); }); });
     st.addEventListener("pointerdown", function (e) { if (!e.target.closest(".k-tab, .k-btn, .k-theme, .k-rail, .k-pop")) { touch(); } });
@@ -767,9 +911,9 @@
   st = document.getElementById("stage");
   st.className = "stage t-dark";
   st.innerHTML = chrome();
-  Array.prototype.forEach.call(document.querySelectorAll("#robot, #cat, .robot-wrap"), function (n) { st.appendChild(n); });   // warstwy postaci wewnątrz sceny: nagłówek, stopka i popover nad nimi
+  Array.prototype.forEach.call(document.querySelectorAll("#robot, #cat, #hero, .robot-wrap"), function (n) { st.appendChild(n); });   // warstwy postaci wewnątrz sceny: nagłówek, stopka i popover nad nimi
   icons(st);
-  refs = { logo: el("kLogo"), rail: el("kRail"), theme: el("kTheme"), pop: el("kPop"), speeds: el("kSpeeds"), robotBtn: el("kRobot"), catBtn: el("kCat"), setBtn: st.querySelector("[data-act=settings]"), copy: el("kCopy"), name: el("kName"), tag: el("kTag"), phase: el("kPhase"), view: el("kView"), tabs: el("kTabs"), mode: el("kMode"), prog: el("kProg"), progBar: el("kProgBar"), idle: el("kIdle") };
+  refs = { logo: el("kLogo"), rail: el("kRail"), theme: el("kTheme"), pop: el("kPop"), speeds: el("kSpeeds"), robotBtn: el("kRobot"), catBtn: el("kCat"), heroBtn: el("kHero"), setBtn: st.querySelector("[data-act=settings]"), copy: el("kCopy"), name: el("kName"), tag: el("kTag"), phase: el("kPhase"), view: el("kView"), tabs: el("kTabs"), mode: el("kMode"), prog: el("kProg"), progBar: el("kProgBar"), idle: el("kIdle") };
   initTheme();
   listen();
   setSpeed(SPEEDS.indexOf(speed) >= 0 ? speed : 1);
@@ -779,8 +923,11 @@
   let catPref = "0";
   try { catPref = localStorage.getItem("kiosk-cat") || "0"; } catch (e) {}
   setCat(catPref === "1");
+  let heroPref = "0";
+  try { heroPref = localStorage.getItem("kiosk-hero") || "0"; } catch (e) {}
+  setHero(heroPref === "1");
   st.setAttribute("data-mode", "loop");
   let startP = parseInt(new URLSearchParams(location.search).get("p") || "0", 10);
   play(isNaN(startP) ? 0 : Math.max(0, Math.min(PRODUCTS.length - 1, startP)), 0);
-  window.KIOSK = { play: play, select: select, selectProduct: selectProduct, act: act, setRobot: setRobot, setCat: setCat, catAgain: function () { if (cat) { cat.again(); } }, catState: function () { return cat ? cat.state : null; }, setSpeed: setSpeed, products: PRODUCTS };
+  window.KIOSK = { play: play, select: select, selectProduct: selectProduct, act: act, setRobot: setRobot, setCat: setCat, setHero: setHero, heroNow: function (kind) { if (hero) { hero.launch(kind); } }, heroState: function () { return hero ? hero.state : null; }, catAgain: function () { if (cat) { cat.again(); } }, catState: function () { return cat ? cat.state : null; }, setSpeed: setSpeed, products: PRODUCTS };
 })();

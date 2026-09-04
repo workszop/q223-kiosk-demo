@@ -16,6 +16,8 @@ window.Robot = (function () {
   const DEFAULT_PALETTE = {
     body: '#F1F0EC', dark: '#8E97A6', metal: '#4B5563', pink: '#d20757', berry: '#8A004C',
     teal: '#0E9F8E', eye: '#7FF5E8', eyeOff: '#1E3140', shadow: 'rgba(0,0,0,0.45)',
+    // heroes (easter eggs)
+    red: '#C8102E', blue: '#1E3A8A', gold: '#E3B341', green: '#3FA34D', greenDark: '#1F6B33', black: '#15181F', white: '#F7F7F5',
   };
   const CORNERS = Array.from({ length: 8 }, (_, i) => [i & 4 ? 0.5 : -0.5, i & 2 ? 0.5 : -0.5, i & 1 ? 0.5 : -0.5]);
   const FACES = [
@@ -94,7 +96,56 @@ window.Robot = (function () {
     return { parts: Object.assign({ body, head, tail }, legs), height: 11, shadow: 4.5, walkYaw: 1.1 };
   }
 
-  const MODELS = { bot: () => buildBot(), 'bot-f': () => buildBot('f'), cat: () => buildCat() };
+  // easter-egg heroes: same humanoid rig as the bot (head, body, two arms, two legs), different colours and bulk
+  function buildHero(kind) {
+    const head = part(10, 0), body = part(5, 0);
+    const armL = part(9.5, 0, 'armL'), armR = part(9.5, 0, 'armR');
+    const legL = part(5, 0, 'legL'), legR = part(5, 0, 'legR');
+    if (kind === 'spider') {
+      box(head, -2, 2, 10, 14, -2, 2, 'red');
+      set(head, 0, 14, 0, 'black'); set(head, 0, 13, 2, 'black'); set(head, 0, 10, 2, 'black'); set(head, -2, 12, 0, 'black'); set(head, 2, 12, 0, 'black');   // web lines
+      box(head, -1, -1, 11, 12, 2, 2, 'white'); box(head, 1, 1, 11, 12, 2, 2, 'white');                                                                 // big eyes
+      box(body, -2, 2, 5, 9, -1, 1, 'red');
+      box(body, -2, 2, 5, 6, -1, 1, 'blue');
+      set(body, 0, 8, 1, 'black'); set(body, 0, 7, 1, 'black'); set(body, -1, 8, 1, 'black'); set(body, 1, 8, 1, 'black');                              // spider emblem
+      box(armL, -4, -3, 5, 9, -1, 0, 'blue'); box(armL, -4, -3, 5, 6, -1, 0, 'red');
+      box(armR, 3, 4, 5, 9, -1, 0, 'blue');   box(armR, 3, 4, 5, 6, -1, 0, 'red');
+      box(legL, -2, -1, 1, 4, -1, 0, 'blue'); box(legL, -2, -1, 0, 1, -1, 1, 'red');
+      box(legR, 1, 2, 1, 4, -1, 0, 'blue');   box(legR, 1, 2, 0, 1, -1, 1, 'red');
+      return { parts: { body, head, legL, legR, armL, armR }, height: 17, shadow: 5.5, walkYaw: 0.8 };
+    }
+    if (kind === 'iron') {
+      box(head, -2, 2, 10, 14, -2, 2, 'red');
+      box(head, -1, 1, 11, 13, 2, 2, 'gold');
+      set(head, -1, 12, 2, 'eye'); set(head, 1, 12, 2, 'eye');
+      box(body, -2, 2, 5, 9, -1, 1, 'red');
+      box(body, -1, 1, 6, 8, 1, 1, 'gold'); set(body, 0, 7, 1, 'eye');                                                                                   // chest plate, arc reactor
+      box(armL, -4, -3, 5, 9, -1, 0, 'red'); box(armL, -4, -3, 9, 9, -1, 0, 'gold'); box(armL, -4, -3, 5, 5, -1, 0, 'gold');
+      box(armR, 3, 4, 5, 9, -1, 0, 'red');   box(armR, 3, 4, 9, 9, -1, 0, 'gold');   box(armR, 3, 4, 5, 5, -1, 0, 'gold');
+      box(legL, -2, -1, 1, 4, -1, 0, 'red'); box(legL, -2, -1, 0, 1, -1, 1, 'gold');
+      box(legR, 1, 2, 1, 4, -1, 0, 'red');   box(legR, 1, 2, 0, 1, -1, 1, 'gold');
+      return { parts: { body, head, legL, legR, armL, armR }, height: 17, shadow: 5.5, walkYaw: 0.8 };
+    }
+    // hulk: wide body, thick arms, purple shorts
+    box(head, -2, 2, 10, 14, -2, 2, 'green');
+    box(head, -2, 2, 14, 14, -2, 2, 'greenDark'); box(head, -2, 2, 13, 13, -2, -2, 'greenDark'); box(head, -2, 2, 13, 13, -2, 1, 'greenDark');           // hair
+    box(head, -2, 2, 12, 12, 2, 2, 'green');
+    set(head, -1, 12, 2, 'white'); set(head, 1, 12, 2, 'white'); box(head, -1, 1, 10, 10, 2, 2, 'greenDark');                                            // eyes, mouth
+    box(body, -3, 3, 5, 9, -2, 1, 'green');
+    box(body, -3, 3, 5, 5, -2, 1, 'berry');
+    box(armL, -5, -4, 4, 9, -1, 0, 'green'); box(armR, 4, 5, 4, 9, -1, 0, 'green');
+    box(legL, -2, -1, 1, 4, -1, 0, 'green'); box(legL, -2, -1, 3, 4, -1, 0, 'berry'); box(legL, -2, -1, 0, 0, -1, 1, 'greenDark');
+    box(legR, 1, 2, 1, 4, -1, 0, 'green');   box(legR, 1, 2, 3, 4, -1, 0, 'berry');   box(legR, 1, 2, 0, 0, -1, 1, 'greenDark');
+    return { parts: { body, head, legL, legR, armL, armR }, height: 17, shadow: 7, walkYaw: 0.8 };
+  }
+
+  const MODELS = { bot: () => buildBot(), 'bot-f': () => buildBot('f'), cat: () => buildCat(), spider: () => buildHero('spider'), iron: () => buildHero('iron'), hulk: () => buildHero('hulk') };
+  // named limb poses (target angles), blended in by pose.poseA when animate() gets input.pose
+  const POSES = {
+    hang: { armL: -3.0, armR: -3.0, legL: 0.25, legR: -0.25 },   // both arms up, holding the thread
+    fly:  { armL: 0.55, armR: 0.55, legL: 0, legR: 0 },           // arms swept back
+    land: { armL: -0.9, armR: -0.9, legL: 0, legR: 0 },           // arms forward-down after the impact
+  };
 
   // ─── Helpers ───
   function normalize(v) { const l = Math.hypot(...v); return v.map(a => a / l); }
@@ -139,7 +190,8 @@ window.Robot = (function () {
     function levelOf(lum) { return Math.round((0.55 + 0.45 * (0.5 + 0.5 * clamp(lum, -1, 1))) * 100) / 100; }
 
     // pose: x, y = feet anchor in CSS px; lift = height above the anchor in voxels (jump)
-    const pose = { x: 0, y: 0, lift: 0, yaw: 0, walkBlend: 0, phase: 0, waveA: 0, stretchA: 0, airborne: false, eyesClosed: false, t: 0, nextBlink: 2, visible: true };
+    const pose = { x: 0, y: 0, lift: 0, yaw: 0, pitch: 0, walkBlend: 0, phase: 0, waveA: 0, stretchA: 0, poseA: 0, poseName: null, airborne: false, eyesClosed: false, t: 0, nextBlink: 2, visible: true, shadow: true };
+    // pitch: lean of the whole figure around its centre (forward = negative); shadow: false for figures in the air
     let W = 0, H = 0;
 
     // screen-space bounds of the standing robot (CSS px, relative to the feet anchor)
@@ -160,7 +212,7 @@ window.Robot = (function () {
     }
     function clear() { ctx.clearRect(0, 0, W, H); }
 
-    // advance animation blends; input = { walking, waving, stretching, airborne, yawTarget }
+    // advance animation blends; input = { walking, waving, stretching, airborne, yawTarget, pose (name from POSES) }
     function animate(dt, input) {
       pose.t += dt;
       pose.yaw += (input.yawTarget - pose.yaw) * Math.min(1, TURN_SPEED * dt);
@@ -168,6 +220,8 @@ window.Robot = (function () {
       if (input.walking || pose.walkBlend > 0) pose.phase += dt * STEP_HZ * Math.PI * 2;
       pose.waveA = clamp(pose.waveA + (input.waving ? 1 : -1) * BLEND_SPEED * dt, 0, 1);
       pose.stretchA = clamp(pose.stretchA + (input.stretching ? 1 : -1) * STRETCH_SPEED * dt, 0, 1);
+      if (input.pose && POSES[input.pose]) pose.poseName = input.pose;
+      pose.poseA = clamp(pose.poseA + (input.pose ? 1 : -1) * BLEND_SPEED * dt, 0, 1);
       pose.airborne = !!input.airborne;
       if (pose.t > pose.nextBlink) { pose.eyesClosed = !pose.eyesClosed; pose.nextBlink = pose.t + (pose.eyesClosed ? 0.12 : rand(2.2, 4.5)); }
     }
@@ -176,6 +230,10 @@ window.Robot = (function () {
       const out = [], swing = Math.sin(pose.phase) * pose.walkBlend;
       let legL = swing * LEG_AMP, legR = -swing * LEG_AMP, armL = -swing * ARM_AMP, armR = swing * ARM_AMP;
       if (pose.airborne) { legL = legR = 0.55; armL = armR = -1.3; }
+      if (pose.poseA > 0 && POSES[pose.poseName]) {
+        const P = POSES[pose.poseName], a = pose.poseA, mix = (v, t) => v * (1 - a) + t * a;
+        legL = mix(legL, P.legL); legR = mix(legR, P.legR); armL = mix(armL, P.armL); armR = mix(armR, P.armR);
+      }
       if (pose.waveA > 0) armR = -(2.5 + Math.sin(pose.t * 14) * 0.35) * pose.waveA;
       const tail = Math.sin(pose.t * 4) * 0.35 + pose.waveA * 0.6 + (pose.airborne ? 0.5 : 0);
       const angles = { legL, legR, armL, armR, tail, none: 0 }, s = pose.stretchA;
@@ -198,12 +256,15 @@ window.Robot = (function () {
       }
       const ox = pose.x, oy = pose.y;
       // shadow
-      const k = clamp(1 - pose.lift / 20, 0.35, 1);
-      ctx.fillStyle = PAL.shadow; ctx.beginPath();
-      ctx.ellipse(ox, oy, MODEL.shadow * UNIT * k, MODEL.shadow * UNIT * SP * k, 0, 0, Math.PI * 2); ctx.fill();
+      if (pose.shadow) {
+        const k = clamp(1 - pose.lift / 20, 0.35, 1);
+        ctx.fillStyle = PAL.shadow; ctx.beginPath();
+        ctx.ellipse(ox, oy, MODEL.shadow * UNIT * k, MODEL.shadow * UNIT * SP * k, 0, 0, Math.PI * 2); ctx.fill();
+      }
       // voxels
-      const cy = Math.cos(pose.yaw), sy = Math.sin(pose.yaw);
-      const rot = (x, y, z) => [x * cy + z * sy, y, -x * sy + z * cy];
+      const cy = Math.cos(pose.yaw), sy = Math.sin(pose.yaw), cp = Math.cos(pose.pitch), sp2 = Math.sin(pose.pitch);
+      const hc = MODEL.height * 0.5;   // pitch pivots around the figure's centre
+      const rot = (x, y, z) => { const y1 = y * cp - z * sp2, z1 = y * sp2 + z * cp; return [x * cy + z1 * sy, y1, -x * sy + z1 * cy]; };   // pitch in model space (positive = lean forward), then yaw
       // per limb-angle geometry cache: corner offsets + face visibility/shade (angle 0 = body/head)
       const geo = {};
       function geometry(angle) {
@@ -220,8 +281,8 @@ window.Robot = (function () {
       const bob = pose.walkBlend * (Math.abs(Math.sin(pose.phase)) - 0.5) * 0.5 - pose.stretchA * 0.4;   // stretching: chest sinks a little
       const items = [];
       for (const v of buildPose()) {
-        const w = rot(v.x + 0.5, v.y + 0.5, v.z + 0.5);
-        const p = cam(w[0], w[1] + pose.lift + bob, w[2]);
+        const w = rot(v.x + 0.5, v.y + 0.5 - hc, v.z + 0.5);
+        const p = cam(w[0], w[1] + hc + pose.lift + bob, w[2]);
         let c = v.c;
         if (c === 'eye' && pose.eyesClosed) c = 'eyeOff';
         if (c === 'tip') c = Math.floor(pose.t * 2) % 2 ? 'pink' : 'teal';
@@ -244,7 +305,7 @@ window.Robot = (function () {
     function headTop() { const p = cam(0, MODEL.height + 2 + pose.lift, 0); return [pose.x + p[0] * UNIT, pose.y + p[1] * UNIT]; }
 
     resize();
-    return { pose, bounds, unit: UNIT, model: opts.model || 'bot', resize, clear, animate, draw, headTop, WALK_YAW: MODEL.walkYaw || WALK_YAW, CAM_YAW };
+    return { pose, bounds, unit: UNIT, model: opts.model || 'bot', ctx, height: MODEL.height, resize, clear, animate, draw, headTop, WALK_YAW: MODEL.walkYaw || WALK_YAW, CAM_YAW };
   }
 
   // ─── Kiosk director: strolls in front of the stage cards ───
