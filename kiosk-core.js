@@ -52,6 +52,16 @@
 
   // ─── Helpers ───
   function el(id) { return document.getElementById(id); }
+  // Kadr 16:9 (.k-frame) w układzie ekranu: postaci liczą pozycje i rozmiar od niego, nie od okna; 1920 px szerokości to skala 1
+  const FRAME_REF_W = 1920;
+  function frameRect() { let r = refs.frame ? refs.frame.getBoundingClientRect() : { left: 0, top: 0, right: innerWidth, bottom: innerHeight, width: innerWidth, height: innerHeight }; return { left: r.left, top: r.top, right: r.right, bottom: r.bottom, width: r.width, height: r.height }; }
+  function scale() { return frameRect().width / FRAME_REF_W; }
+  function px(v) { return v * scale(); }
+  function syncFrame() {   // szerokość kadru dla dymków (cqw) i przycięcie płócien postaci do kadru
+    let f = frameRect(), clip = "inset(" + Math.max(0, f.top) + "px " + Math.max(0, innerWidth - f.right) + "px " + Math.max(0, innerHeight - f.bottom) + "px " + Math.max(0, f.left) + "px)";
+    document.documentElement.style.setProperty("--frame-w", f.width + "px");
+    Array.prototype.forEach.call(document.querySelectorAll("#robot, #cat, #hero, .robot-wrap"), function (n) { n.style.clipPath = clip; });
+  }
   function q(sel) { return st.querySelector(sel); }
   // Ikony z kiosk-icons.js (osadzone lokalnie): <i data-lucide="x" class="icon"> -> <svg class="icon">; tylko w podanym poddrzewie
   function icons(root) {
@@ -93,7 +103,7 @@
 
   // ─── Render: chrome ───
   function chrome() {
-    return "<header class=\"k-head\"><img class=\"k-logo\" id=\"kLogo\" src=\"" + LOGO.dark + "\" alt=\"Quantica Lab\">" +
+    return "<div class=\"k-frame\" id=\"kFrame\"><header class=\"k-head\"><img class=\"k-logo\" id=\"kLogo\" src=\"" + LOGO.dark + "\" alt=\"Quantica Lab\">" +
       "<nav class=\"k-rail\" id=\"kRail\" aria-label=\"Produkty\">" + PRODUCTS.map(function (p, k) { return "<button type=\"button\" data-p=\"" + k + "\" aria-pressed=\"false\">" + esc(p.name) + "</button>"; }).join("") + "</nav>" +
       "<button class=\"k-theme\" id=\"kTheme\" type=\"button\" aria-label=\"Przełącz schemat jasny/ciemny\"><i data-lucide=\"sun\" class=\"icon ico-sun\"></i><i data-lucide=\"moon\" class=\"icon ico-moon\"></i></button></header>" +
       "<div class=\"k-headline\"><div class=\"k-copy\" id=\"kCopy\"><h1 class=\"k-h1\" id=\"kName\"></h1><p class=\"k-tagline\" id=\"kTag\"></p></div>" +
@@ -114,7 +124,7 @@
       "<div class=\"k-row\"><span class=\"k-pop-t\">Robot</span><button class=\"k-toggle\" id=\"kRobot\" type=\"button\" aria-pressed=\"false\"><i></i><span>wyłączony</span></button></div>" +
       "<div class=\"k-row\"><span class=\"k-pop-t\">Kot</span><button class=\"k-toggle\" id=\"kCat\" type=\"button\" aria-pressed=\"false\"><i></i><span>wyłączony</span></button></div>" +
       "<div class=\"k-row\"><span class=\"k-pop-t\">Bohaterowie</span><button class=\"k-toggle\" id=\"kHero\" type=\"button\" aria-pressed=\"false\"><i></i><span>wyłączony</span></button></div>" +
-      "<div class=\"k-row\"><span class=\"k-pop-t\">Scenariusz</span><button class=\"k-pop-replay\" type=\"button\" data-act=\"replay\">" + SVG.replay + "od nowa</button></div></div>";
+      "<div class=\"k-row\"><span class=\"k-pop-t\">Scenariusz</span><button class=\"k-pop-replay\" type=\"button\" data-act=\"replay\">" + SVG.replay + "od nowa</button></div></div></div>";
   }
   function renderTabs(p) {
     refs.tabs.innerHTML = p.tabs.map(function (t, k) { return "<button class=\"k-tab\" type=\"button\" data-scn=\"" + k + "\"><span>" + (k + 1) + "</span><span>" + esc(t) + "</span></button>"; }).join("");
@@ -552,8 +562,8 @@
     let canvas = document.getElementById("robot"), bubble = document.getElementById("robotBubble");
     companionToggle("robot", refs.robotBtn, canvas, bubble, robotOn);
     if (robotOn && !robot && window.Robot && canvas) {
-      let renderer = window.Robot.create({ canvas: canvas, smooth: true, unit: 9 });   // wersja wygładzona (pełna rozdzielczość, antyaliasing)
-      robot = { renderer: renderer, director: window.Robot.kiosk({ renderer: renderer, stage: "#stage", view: "#kView", bubble: bubble, remarks: ROBOT_REMARKS, speed: function () { return speed; } }) };
+      let renderer = window.Robot.create({ canvas: canvas, smooth: true, unit: function () { return px(9); } });   // wersja wygładzona; rozmiar woksela skaluje się z kadrem
+      robot = { renderer: renderer, director: window.Robot.kiosk({ renderer: renderer, stage: "#stage", view: "#kView", bubble: bubble, remarks: ROBOT_REMARKS, speed: function () { return speed; }, walkSpeed: function () { return px(170); }, bounds: frameRect }) };
     }
     if (robot) { robot.renderer.pose.visible = robotOn; if (robotOn) { robot.renderer.resize(); robot.director.restart(); } }
   }
@@ -566,7 +576,7 @@
     const FOLLOW_CHANCE = 0.22, FOLLOW_GAP = 1.3;   // szansa na tryb "za robotem" i odstęp od robota (w szerokościach kota)
     const LEFTWARD_CHANCE = 0.25;                     // szansa, że trasa po górze idzie z prawej do lewej
     let SEL = ".fl-node, .card, .dy-page, .pa-wave, .pa-script, .pa-docs, .km-mail, .km-analysis, .km-lane, .gw-item, .oc-row, .kr-out";
-    let SPEED = 150, JUMP_SPEED = 260, W = renderer.bounds.w;
+    let SPEED = 150, JUMP_SPEED = 260, W = renderer.bounds.w;   // prędkości w px/s przy skali 1; W = szerokość kota (odświeżana z kadrem)
     function topRow() {
       let view = document.getElementById("kView"), list = [];
       view.querySelectorAll(SEL).forEach(function (e) { let r = e.getBoundingClientRect(); if (r.width > 60 && r.height > 60) { list.push(r); } });
@@ -578,17 +588,18 @@
       return merged;
     }
     function plan() {
-      let row = topRow();
+      let row = topRow(), fr = frameRect();
+      W = renderer.bounds.w;
       if (!row.length) { return false; }
       let dir = Math.random() < LEFTWARD_CHANCE ? -1 : 1, cards = dir > 0 ? row : row.slice().reverse();
       let y = row[0].top - 2, path = [];
       C.dir = dir;
-      path.push({ x: dir > 0 ? -W : innerWidth + W, y: y, walk: true, speed: SPEED });
+      path.push({ x: dir > 0 ? fr.left - W : fr.right + W, y: y, walk: true, speed: SPEED });
       cards.forEach(function (c, k) {
         path.push({ x: dir > 0 ? c.right - W * 0.25 : c.left + W * 0.25, y: c.top - 2, walk: true, speed: SPEED });
         if (k < cards.length - 1) { let n = cards[k + 1]; path.push({ x: dir > 0 ? n.left + W * 0.25 : n.right - W * 0.25, y: n.top - 2, walk: false, speed: JUMP_SPEED, jump: true }); }
       });
-      path.push({ x: dir > 0 ? innerWidth + W : -W, y: y, walk: true, speed: SPEED });
+      path.push({ x: dir > 0 ? fr.right + W : fr.left - W, y: y, walk: true, speed: SPEED });
       // czasem zatrzymuje się na jednej z kart: odwraca się do widza i miauczy albo przeciąga się (bokiem) i mruczy
       if (Math.random() < 0.7) {
         let c = row[Math.floor(Math.random() * row.length)];
@@ -624,7 +635,7 @@
         if (C.stopT >= sp.stop) { C.stopT = 0; C.seg += 1; if (C.seg >= C.path.length) { C.active = false; } }
       } else if (C.active) {
         let seg = C.path[C.seg];
-        let dx = seg.x - pose.x, dy = seg.y - pose.y, d = Math.hypot(dx, dy), step = seg.speed * dt * speed;
+        let dx = seg.x - pose.x, dy = seg.y - pose.y, d = Math.hypot(dx, dy), step = px(seg.speed) * dt * speed;
         if (seg.jump) {
           let prev = C.path[C.seg - 1], span = Math.hypot(seg.x - prev.x, seg.y - prev.y) || 1, done = 1 - d / span;
           pose.lift = Math.max(0, Math.sin(done * Math.PI) * 7);
@@ -643,20 +654,21 @@
     // ── tryb "za robotem": kot wchodzi z brzegu na poziom robota, trzyma się o krok za nim, w przerwach czasem się przeciąga, po chwili schodzi ze sceny
     function robotInFront() {
       if (!robotOn || !robot) { return false; }
-      let rp = robot.renderer.pose;
-      return robot.director.state.layer === "front" && rp.x > W && rp.x < innerWidth - W;
+      let rp = robot.renderer.pose, fr = frameRect();
+      return robot.director.state.layer === "front" && rp.x > fr.left + W && rp.x < fr.right - W;
     }
     function startFollow() {
-      let rp = robot.renderer.pose;
+      let rp = robot.renderer.pose, fr = frameRect();
+      W = renderer.bounds.w;
       C.mode = "follow"; C.active = true; C.leaving = false; C.idleT = 0; C.stretchUntil = 0;
       C.followUntil = C.t + 9 + Math.random() * 6; C.meowed = false; C.meowAt = C.t + 1.5;
-      pose.x = rp.x > innerWidth / 2 ? -W : innerWidth + W; pose.y = rp.y; pose.lift = 0;
+      pose.x = rp.x > fr.left + fr.width / 2 ? fr.left - W : fr.right + W; pose.y = rp.y; pose.lift = 0;
     }
     function followStep(dt) {
-      let rp = robot.renderer.pose, out = { walking: false, stretching: false, yaw: 0 };
-      if (!C.leaving && (C.t > C.followUntil || !robotOn || robot.director.state.layer !== "front")) { C.leaving = true; C.exitX = pose.x < innerWidth / 2 ? -W : innerWidth + W; C.stretchUntil = 0; }
+      let rp = robot.renderer.pose, out = { walking: false, stretching: false, yaw: 0 }, fr = frameRect();
+      if (!C.leaving && (C.t > C.followUntil || !robotOn || robot.director.state.layer !== "front")) { C.leaving = true; C.exitX = pose.x < fr.left + fr.width / 2 ? fr.left - W : fr.right + W; C.stretchUntil = 0; }
       let gap = W * FOLLOW_GAP, tx = C.leaving ? C.exitX : rp.x + (pose.x < rp.x ? -gap : gap), ty = C.leaving ? pose.y : rp.y;
-      let dx = tx - pose.x, dy = ty - pose.y, d = Math.hypot(dx, dy), step = SPEED * dt * speed;
+      let dx = tx - pose.x, dy = ty - pose.y, d = Math.hypot(dx, dy), step = px(SPEED) * dt * speed;
       if (C.stretchUntil) {
         out.stretching = C.t < C.stretchUntil; out.yaw = C.lastYaw;
         if (!out.stretching) { C.stretchUntil = 0; }
@@ -679,9 +691,9 @@
       if (C.active) {
         renderer.draw(null);
         if (C.bubbleUntil) {
-          let h = renderer.headTop();
-          if (h[0] < W * 0.5 || h[0] > innerWidth - W * 0.5) { hideBubble(); }   // kot poza ekranem: dymek znika zamiast wisieć przy krawędzi
-          else { bubble.style.left = Math.min(Math.max(h[0], 80), innerWidth - 80) + "px"; bubble.style.top = Math.max(h[1], 40) + "px"; }
+          let h = renderer.headTop(), fr = frameRect();
+          if (h[0] < fr.left + W * 0.5 || h[0] > fr.right - W * 0.5) { hideBubble(); }   // kot poza kadrem: dymek znika zamiast wisieć przy krawędzi
+          else { bubble.style.left = Math.min(Math.max(h[0], fr.left + 80), fr.right - 80) + "px"; bubble.style.top = Math.max(h[1], fr.top + 40) + "px"; }
         }
       }
     }
@@ -698,7 +710,7 @@
     let canvas = document.getElementById("cat"), bubble = document.getElementById("catBubble");
     companionToggle("cat", refs.catBtn, canvas, bubble, catOn);
     if (catOn && !cat && window.Robot && canvas) {
-      let renderer = window.Robot.create({ canvas: canvas, model: "cat", smooth: true, unit: 9 });
+      let renderer = window.Robot.create({ canvas: canvas, model: "cat", smooth: true, unit: function () { return px(9); } });
       cat = makeCat(renderer, canvas, bubble);
     }
     if (cat && catOn) { cat.renderer.resize(); cat.state.product = null; }   // płótno mogło zostać zmierzone jako 0×0, gdy było ukryte
@@ -714,28 +726,28 @@
     let R = {}, H = { active: false, kind: null, phase: "idle", t: 0, launchAt: 0, pending: null, dust: [], cracks: [], bubbleUntil: 0 };
     let ctx = null;
     function renderer(kind) {
-      if (!R[kind]) { R[kind] = window.Robot.create({ canvas: canvas, model: kind, smooth: true, unit: kind === "hulk" ? 12 : 9 }); R[kind].pose.shadow = false; }
+      if (!R[kind]) { R[kind] = window.Robot.create({ canvas: canvas, model: kind, smooth: true, unit: kind === "hulk" ? function () { return px(12); } : function () { return px(9); } }); R[kind].pose.shadow = false; }
       ctx = R[kind].ctx;
       return R[kind];
     }
     function color(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
     function launch(kind) {
-      let r = renderer(kind), p = r.pose, W = innerWidth, Hh = innerHeight;
+      let r = renderer(kind), p = r.pose, fr = frameRect(), W = fr.width, Hh = fr.height, L = fr.left, T = fr.top, s = scale();
       r.resize();   // płótno mogło być ukryte (0×0) przy tworzeniu renderera lub zmianie rozmiaru
       H.kind = kind; H.active = true; H.t = 0; H.dust = []; H.cracks = []; H.phase = "in"; H.pose = p; hideBubble();
       p.lift = 0; p.pitch = 0; p.yaw = 0; p.poseA = 0; p.airborne = false; p.visible = true;
       if (kind === "spider") {
         H.dir = Math.random() < 0.5 ? 1 : -1;
-        H.x0 = H.dir > 0 ? W * 0.12 : W * 0.88; H.y0 = Hh * 0.42;
-        H.anchor = [H.dir > 0 ? W * 0.55 : W * 0.45, -12];
-        p.x = H.x0; p.y = -r.height * r.unit - 20;
+        H.x0 = L + (H.dir > 0 ? W * 0.12 : W * 0.88); H.y0 = T + Hh * 0.42;
+        H.anchor = [L + (H.dir > 0 ? W * 0.55 : W * 0.45), T - 12 * s];
+        p.x = H.x0; p.y = T - r.height * r.unit - 20 * s;
       } else if (kind === "iron") {                                              // from a bottom corner up to the opposite top corner
         H.dir = Math.random() < 0.5 ? 1 : -1;
-        p.x = H.dir > 0 ? W * 0.12 : W * 0.88; p.y = Hh + 160;
-        H.vx = H.dir * (W * 0.7) / 2.4; H.vy = -(Hh + 420) / 2.4;
+        p.x = L + (H.dir > 0 ? W * 0.12 : W * 0.88); p.y = T + Hh + 160 * s;
+        H.vx = H.dir * (W * 0.7) / 2.4; H.vy = -(Hh + 420 * s) / 2.4;
       } else {
-        p.x = W * (0.2 + Math.random() * 0.6); p.y = -r.height * r.unit - 40;
-        H.vy = 0; H.ground = Hh - 18;
+        p.x = L + W * (0.2 + Math.random() * 0.6); p.y = T - r.height * r.unit - 40 * s;
+        H.vy = 0; H.ground = T + Hh - 18 * s;
       }
     }
     function update(dt) {
@@ -743,38 +755,38 @@
         if (H.launchAt && (H.t += dt) >= H.launchAt) { H.launchAt = 0; launch(H.pending); }
         return;
       }
-      let r = R[H.kind], p = r.pose, W = innerWidth, Hh = innerHeight, k = H.kind;
+      let r = R[H.kind], p = r.pose, fr = frameRect(), W = fr.width, Hh = fr.height, L = fr.left, T = fr.top, s = scale(), k = H.kind;
       H.t += dt * speed; let ds = dt * speed;
       let input = { walking: false, waving: false, airborne: false, yawTarget: 0, pose: null };
       if (k === "spider") {
         let ax = H.anchor[0], ay = H.anchor[1], hx = r.headTop();
         input.pose = "hang";
         if (H.phase === "in") {                                                       // drop on the thread to mid height
-          p.y = Math.min(H.y0, p.y + 520 * ds); input.yawTarget = 0;
+          p.y = Math.min(H.y0, p.y + 520 * s * ds); input.yawTarget = 0;
           if (p.y >= H.y0) { H.phase = "dangle"; H.pt = 0; }
         } else if (H.phase === "dangle") {                                            // a moment facing the viewer
-          H.pt += ds; input.yawTarget = 0; p.x = H.x0 + Math.sin(H.t * 3) * 6;
+          H.pt += ds; input.yawTarget = 0; p.x = H.x0 + Math.sin(H.t * 3) * 6 * s;
           if (H.pt > 0.9) { H.phase = "swing"; H.pt = 0; H.L = Math.hypot(p.x - ax, p.y - ay); H.th0 = Math.atan2(p.x - ax, p.y - ay); }
         } else if (H.phase === "swing") {                                             // pendulum arc across the screen, then release
-          H.pt += ds; let T = 1.7, th = H.th0 * Math.cos(Math.PI * Math.min(1, H.pt / T));
+          H.pt += ds; let T = 1.7, th = H.th0 * Math.cos(Math.PI * Math.min(1, H.pt / T));   // T here: swing duration (s)
           p.x = ax + Math.sin(th) * H.L; p.y = ay + Math.cos(th) * H.L;
           input.yawTarget = H.dir * r.WALK_YAW - r.CAM_YAW; p.pitch = -th * 0.6 * H.dir;   // pochylony wzdłuż nici
-          if (H.pt >= T) { H.phase = "out"; H.vx = H.dir * 900; H.vy = -700; }
+          if (H.pt >= T) { H.phase = "out"; H.vx = H.dir * 900 * s; H.vy = -700 * s; }
         } else {                                                                      // ballistic exit
-          input.pose = "fly"; H.vy += 1500 * ds; p.x += H.vx * ds; p.y += H.vy * ds;
+          input.pose = "fly"; H.vy += 1500 * s * ds; p.x += H.vx * ds; p.y += H.vy * ds;
           input.yawTarget = H.dir * r.WALK_YAW - r.CAM_YAW; p.pitch = 1.0;
-          if (p.x < -200 || p.x > W + 200 || p.y > Hh + 200) { H.active = false; }
+          if (p.x < L - 200 * s || p.x > L + W + 200 * s || p.y > T + Hh + 200 * s) { H.active = false; }
         }
       } else if (k === "iron") {
         input.pose = "fly"; input.yawTarget = 0; p.pitch = -0.3;                 // facing the viewer, leaning back a little as he climbs
         p.x += H.vx * ds; p.y += H.vy * ds;
-        if (p.y < -r.height * r.unit - 80) { H.active = false; }
+        if (p.y < T - r.height * r.unit - 80 * s) { H.active = false; }
       } else {                                                                        // hulk
         if (H.phase === "in") {
-          input.airborne = true; H.vy += 2600 * ds; p.y += H.vy * ds; input.yawTarget = 0;
+          input.airborne = true; H.vy += 2600 * s * ds; p.y += H.vy * ds; input.yawTarget = 0;
           if (p.y >= H.ground) {
             p.y = H.ground; H.phase = "land"; H.pt = 0; shake(0.55);
-            for (let i = 0; i < 14; i++) { H.dust.push({ x: p.x + (Math.random() - 0.5) * 60, y: p.y, vx: (Math.random() - 0.5) * 260, vy: -Math.random() * 160, r: 8 + Math.random() * 14, a: 1 }); }
+            for (let i = 0; i < 14; i++) { H.dust.push({ x: p.x + (Math.random() - 0.5) * 60 * s, y: p.y, vx: (Math.random() - 0.5) * 260 * s, vy: -Math.random() * 160 * s, r: (8 + Math.random() * 14) * s, a: 1 }); }
           }
         } else if (H.phase === "land") {                                          // crouched after the impact
           input.pose = "land"; input.yawTarget = 0; H.pt += ds; ease(p, 0, 0, ds);
@@ -787,9 +799,9 @@
           if (!H.hit && H.pt > 0.22) {
             H.hit = true; shake(0.45);
             let f = r.project(4, 6.7, 3.5);   // the right fist (arm swung forward-down) in screen px
-            for (let i = 0; i < 12; i++) { H.dust.push({ x: f[0] + (Math.random() - 0.5) * 30, y: f[1], vx: (Math.random() - 0.5) * 300, vy: -Math.random() * 200, r: 6 + Math.random() * 12, a: 1 }); }
+            for (let i = 0; i < 12; i++) { H.dust.push({ x: f[0] + (Math.random() - 0.5) * 30 * s, y: f[1], vx: (Math.random() - 0.5) * 300 * s, vy: -Math.random() * 200 * s, r: (6 + Math.random() * 12) * s, a: 1 }); }
             for (let i = 0; i < 7; i++) {
-              let ang = Math.PI * (0.05 + Math.random() * 0.9) * (Math.random() < 0.5 ? 1 : -1), len = 50 + Math.random() * 90, pts = [[f[0], f[1]]], x = f[0], y = f[1];
+              let ang = Math.PI * (0.05 + Math.random() * 0.9) * (Math.random() < 0.5 ? 1 : -1), len = (50 + Math.random() * 90) * s, pts = [[f[0], f[1]]], x = f[0], y = f[1];
               for (let s = 1; s <= 3; s++) { x += Math.cos(ang) * len / 3; y += Math.sin(ang) * len / 3 * 0.35; ang += (Math.random() - 0.5) * 0.9; pts.push([x, y]); }
               H.cracks.push({ pts: pts, a: 1 });
             }
@@ -797,13 +809,13 @@
           if (H.pt > 0.9) { H.phase = "stand"; H.pt = 0; }
         } else if (H.phase === "stand") {                                         // back up, then leap out
           input.pose = "land"; input.yawTarget = 0; H.pt += ds; ease(p, 0, 0, ds);
-          if (H.pt > 0.6) { H.phase = "out"; H.vy = -2600; H.vx = (Math.random() - 0.5) * 300; }
+          if (H.pt > 0.6) { H.phase = "out"; H.vy = -2600 * s; H.vx = (Math.random() - 0.5) * 300 * s; }
         } else {
-          input.airborne = true; H.vy += 1400 * ds; p.y += H.vy * ds; p.x += H.vx * ds; input.yawTarget = 0; ease(p, 0, 0, ds);
-          if (p.y < -r.height * r.unit - 60 || p.y > Hh + 300) { H.active = false; }
+          input.airborne = true; H.vy += 1400 * s * ds; p.y += H.vy * ds; p.x += H.vx * ds; input.yawTarget = 0; ease(p, 0, 0, ds);
+          if (p.y < T - r.height * r.unit - 60 * s || p.y > T + Hh + 300 * s) { H.active = false; }
         }
         H.cracks.forEach(function (c) { c.a -= ds * 0.6; }); H.cracks = H.cracks.filter(function (c) { return c.a > 0; });
-        H.dust.forEach(function (d) { d.x += d.vx * ds; d.y += d.vy * ds; d.vy += 120 * ds; d.r += 30 * ds; d.a -= ds * 1.3; });
+        H.dust.forEach(function (d) { d.x += d.vx * ds; d.y += d.vy * ds; d.vy += 120 * s * ds; d.r += 30 * s * ds; d.a -= ds * 1.3; });
         H.dust = H.dust.filter(function (d) { return d.a > 0; });
       }
       r.animate(dt, input);
@@ -815,7 +827,7 @@
     function say(text, sec) { bubble.textContent = text; bubble.classList.add("on"); H.bubbleUntil = H.t + sec; }
     function hideBubble() { bubble.classList.remove("on"); H.bubbleUntil = 0; }
     function shake(sec) {
-      let t0 = performance.now(), amp = 9;
+      let t0 = performance.now(), amp = px(9);
       (function step(now) {
         let f = 1 - (now - t0) / (sec * 1000);
         if (f <= 0) { refs.view.style.transform = ""; return; }
@@ -830,12 +842,12 @@
       let p = r.pose;
       if (H.kind === "spider" && H.phase !== "out") {                                 // the thread, from the anchor to the hands above the head
         let h = r.headTop();
-        ctx.save(); ctx.strokeStyle = color("--hero-thread"); ctx.lineWidth = 1.5; ctx.beginPath();
-        ctx.moveTo(H.phase === "swing" ? H.anchor[0] : p.x, H.phase === "swing" ? H.anchor[1] : -12); ctx.lineTo(h[0], h[1] - 8); ctx.stroke(); ctx.restore();
+        ctx.save(); ctx.strokeStyle = color("--hero-thread"); ctx.lineWidth = px(1.5); ctx.beginPath();
+        ctx.moveTo(H.phase === "swing" ? H.anchor[0] : p.x, H.phase === "swing" ? H.anchor[1] : frameRect().top - 12); ctx.lineTo(h[0], h[1] - px(8)); ctx.stroke(); ctx.restore();
       }
       if (H.kind === "hulk" && H.cracks.length) {                                 // cracks radiating from the fist
         ctx.save(); ctx.strokeStyle = color("--hero-crack"); ctx.lineCap = "round";
-        H.cracks.forEach(function (c) { ctx.globalAlpha = Math.max(0, c.a); ctx.lineWidth = 2.5; ctx.beginPath(); c.pts.forEach(function (q, i) { i ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1]); }); ctx.stroke(); });
+        H.cracks.forEach(function (c) { ctx.globalAlpha = Math.max(0, c.a); ctx.lineWidth = px(2.5); ctx.beginPath(); c.pts.forEach(function (q, i) { i ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1]); }); ctx.stroke(); });
         ctx.restore();
       }
       if (H.kind === "hulk" && H.dust.length) {
@@ -844,7 +856,7 @@
         ctx.restore();
       }
       r.draw(null);
-      if (H.bubbleUntil) { let h = r.headTop(); bubble.style.left = Math.min(Math.max(h[0], 120), innerWidth - 120) + "px"; bubble.style.top = Math.max(h[1] - 10, 40) + "px"; }
+      if (H.bubbleUntil) { let h = r.headTop(), fr = frameRect(); bubble.style.left = Math.min(Math.max(h[0], fr.left + 120), fr.right - 120) + "px"; bubble.style.top = Math.max(h[1] - px(10), fr.top + 40) + "px"; }
     }
     let last = performance.now();
     function frame(now) { let dt = Math.min(0.05, (now - last) / 1000); last = now; if (heroOn) { update(dt); render(); } requestAnimationFrame(frame); }
@@ -936,7 +948,8 @@
   st.innerHTML = chrome();
   Array.prototype.forEach.call(document.querySelectorAll("#robot, #cat, #hero, .robot-wrap"), function (n) { st.appendChild(n); });   // warstwy postaci wewnątrz sceny: nagłówek, stopka i popover nad nimi
   icons(st);
-  refs = { logo: el("kLogo"), rail: el("kRail"), theme: el("kTheme"), pop: el("kPop"), speeds: el("kSpeeds"), robotBtn: el("kRobot"), catBtn: el("kCat"), heroBtn: el("kHero"), setBtn: st.querySelector("[data-act=settings]"), copy: el("kCopy"), name: el("kName"), tag: el("kTag"), phase: el("kPhase"), view: el("kView"), tabs: el("kTabs"), mode: el("kMode"), prog: el("kProg"), progBar: el("kProgBar"), idle: el("kIdle") };
+  refs = { frame: el("kFrame"), logo: el("kLogo"), rail: el("kRail"), theme: el("kTheme"), pop: el("kPop"), speeds: el("kSpeeds"), robotBtn: el("kRobot"), catBtn: el("kCat"), heroBtn: el("kHero"), setBtn: st.querySelector("[data-act=settings]"), copy: el("kCopy"), name: el("kName"), tag: el("kTag"), phase: el("kPhase"), view: el("kView"), tabs: el("kTabs"), mode: el("kMode"), prog: el("kProg"), progBar: el("kProgBar"), idle: el("kIdle") };
+  syncFrame(); addEventListener("resize", syncFrame);
   initTheme();
   listen();
   setSpeed(SPEEDS.indexOf(speed) >= 0 ? speed : 1);

@@ -137,7 +137,9 @@ button { font: inherit; }
 .more { color: var(--line); }
 
 /* ─── Scena: nagłówek, tytuł, etykieta fazy, stopka nawigacyjna ─── */
-.stage { position: fixed; inset: 0; width: 100vw; height: 100vh; overflow: hidden; container-type: inline-size; user-select: none; background: var(--st-bg); color: var(--st-fg); }
+.stage { position: fixed; inset: 0; width: 100vw; height: 100vh; overflow: hidden; user-select: none; background: var(--st-bg); color: var(--st-fg); display: grid; place-items: center; }
+/* Kadr 16:9 wpasowany w ekran (przy innych proporcjach resztę wypełnia tło sceny); cqw liczy się od jego szerokości, więc cały układ skaluje się razem z nim */
+.k-frame { position: relative; width: min(100vw, calc(100vh * 16 / 9)); height: min(100vh, calc(100vw * 9 / 16)); container-type: inline-size; overflow: hidden; }
 .stage .icon, .stage svg.icon { width: 1em; height: 1em; vertical-align: -0.12em; flex: none; }
 .k-head { position: absolute; top: 2cqw; left: 2.6cqw; right: 2.6cqw; z-index: 5; display: flex; align-items: center; justify-content: space-between; gap: 1.6cqw; }
 .k-logo { height: 2.8cqw; width: auto; display: block; }
@@ -964,7 +966,7 @@ button { font: inherit; }
 /* ─── Robot i kot (robot.js) na scenie ─── */
 #robot { position: fixed; inset: 0; width: 100vw; height: 100vh; z-index: 3; pointer-events: none; image-rendering: auto; }
 #robot[hidden] { display: none; }
-.robot-wrap { position: fixed; inset: 0; container-type: inline-size; pointer-events: none; z-index: 4; }
+.robot-wrap { position: fixed; left: 0; top: 0; width: var(--frame-w, 100vw); height: 100vh; container-type: inline-size; pointer-events: none; z-index: 4; }   /* szerokość kadru: dymki skalują się jak reszta */
 .robot-bubble {
   position: fixed;
   left: 0;

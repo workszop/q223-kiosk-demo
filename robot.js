@@ -1,8 +1,9 @@
 /* ROBOT - voxel (3D block) robots rendered smoothly on a full-resolution canvas + a stage director for the kiosk (the robot stays in front of the cards).
    Loaded by kiosk-flow.html; kiosk-core.js turns the robot and the cat on from the settings popover.
-   API:  Robot.create({ canvas, model, unit })  -> renderer   (pose in CSS px, feet anchor; unit = CSS px per voxel)
-         Robot.kiosk({ renderer, stage, view, bubble, remarks, cardSelector, speed }) -> director
-         (speed: optional () => number, the kiosk tempo multiplier; walking, waiting and hopping scale with it) */
+   API:  Robot.create({ canvas, model, unit })  -> renderer   (pose in CSS px, feet anchor; unit = CSS px per voxel, a number or a function re-read on resize())
+         Robot.kiosk({ renderer, stage, view, bubble, remarks, cardSelector, speed, walkSpeed, bounds }) -> director
+         (speed: optional () => number, the kiosk tempo multiplier; walking, waiting and hopping scale with it;
+          walkSpeed: px/s or () => px/s; bounds: () => {left, top, right, bottom, width, height} of the stage area, default the viewport) */
 window.Robot = (function () {
   "use strict";
   // ─── Constants ───
@@ -176,7 +177,8 @@ window.Robot = (function () {
   function create(opts) {
     const canvas = opts.canvas, ctx = canvas.getContext('2d');
     const DPR = window.devicePixelRatio || 1;
-    const UNIT = opts.unit || 9;
+    const unitOf = typeof opts.unit === 'function' ? opts.unit : () => opts.unit || 9;
+    let UNIT = unitOf();
     const MODEL = (MODELS[opts.model] || MODELS.bot)();
     const css = getComputedStyle(document.documentElement);
     const PAL = {};
@@ -198,18 +200,25 @@ window.Robot = (function () {
     // pitch: lean of the whole figure around its centre (forward = negative); shadow: false for figures in the air
     let W = 0, H = 0;
 
-    // screen-space bounds of the standing robot (CSS px, relative to the feet anchor)
-    const bounds = (() => {
+    // screen-space bounds of the standing robot (CSS px, relative to the feet anchor); refreshed by resize() when the unit changes
+    const base = (() => {
       let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9;
       for (const p of Object.values(MODEL.parts)) for (const v of p.vox.values()) for (const o of CORNERS) {
         if (v.ext) continue;   // stretch-only voxels do not count toward the standing size
         const q = cam(v.x + 0.5 + o[0], v.y + 0.5 + o[1], v.z + 0.5 + o[2]);
         x0 = Math.min(x0, q[0]); x1 = Math.max(x1, q[0]); y0 = Math.min(y0, q[1]); y1 = Math.max(y1, q[1]);
       }
-      return { left: x0 * UNIT, right: x1 * UNIT, top: y0 * UNIT, bottom: y1 * UNIT, w: (x1 - x0) * UNIT, h: (y1 - y0) * UNIT };
+      return { x0, x1, y0, y1 };
     })();
+    const bounds = {};
+    function measure() {
+      UNIT = unitOf();
+      Object.assign(bounds, { left: base.x0 * UNIT, right: base.x1 * UNIT, top: base.y0 * UNIT, bottom: base.y1 * UNIT, w: (base.x1 - base.x0) * UNIT, h: (base.y1 - base.y0) * UNIT });
+    }
+    measure();
 
     function resize() {
+      measure();
       W = canvas.clientWidth; H = canvas.clientHeight;
       canvas.width = W * DPR; canvas.height = H * DPR;
       ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
@@ -316,7 +325,7 @@ window.Robot = (function () {
     }
 
     resize();
-    return { pose, bounds, unit: UNIT, model: opts.model || 'bot', ctx, height: MODEL.height, resize, clear, animate, draw, headTop, project, WALK_YAW: MODEL.walkYaw || WALK_YAW, CAM_YAW };
+    return { pose, bounds, get unit() { return UNIT; }, model: opts.model || 'bot', ctx, height: MODEL.height, resize, clear, animate, draw, headTop, project, WALK_YAW: MODEL.walkYaw || WALK_YAW, CAM_YAW };
   }
 
   // ─── Kiosk director: strolls in front of the stage cards ───
@@ -330,9 +339,10 @@ window.Robot = (function () {
     const bubble = opts.bubble;
     const REMARKS = opts.remarks || {};
     const SEL = opts.cardSelector || '.fl-node, .card, .dy-page, .pa-wave, .pa-script, .pa-docs';
-    const WALK_PX = opts.walkSpeed || 170;       // CSS px per second
+    const walkPx = typeof opts.walkSpeed === 'function' ? opts.walkSpeed : () => opts.walkSpeed || 170;   // CSS px per second
+    const area = opts.bounds || (() => ({ left: 0, top: 0, right: innerWidth, bottom: innerHeight, width: innerWidth, height: innerHeight }));
     const ENTER = opts.enterSide === 'right' ? 1 : -1;
-    const RW = R.bounds.w;
+    let RW = R.bounds.w;
     const tempo = typeof opts.speed === 'function' ? opts.speed : () => 1;
 
     const S = { cards: [], layer: 'front', product: null, remarkIx: 0, gen: null, action: null, bubbleUntil: 0, said: 0, jump: null, t: 0 };
@@ -362,7 +372,7 @@ window.Robot = (function () {
     }
 
     // actions (consumed by the generator script)
-    const move = (x, y, o) => ({ type: 'move', x, y, speed: (o && o.speed) || WALK_PX, walk: !o || o.walk !== false, face: o && o.face });
+    const move = (x, y, o) => ({ type: 'move', x, y, speed: (o && o.speed) || walkPx(), walk: !o || o.walk !== false, face: o && o.face });
     const wait = s => ({ type: 'wait', s });
     const layer = l => ({ type: 'layer', l });
     const teleport = (x, y) => ({ type: 'teleport', x, y });
@@ -372,27 +382,28 @@ window.Robot = (function () {
     function* life() {
       scanCards();
       // enter from the left edge, in front of everything, along the lowest card bottom
-      const ground = () => (S.cards.length ? Math.max(...S.cards.map(c => c.bottom)) : innerHeight * 0.7) + 4;
+      RW = R.bounds.w;
+      const ground = () => { const a = area(); return (S.cards.length ? Math.max(...S.cards.map(c => c.bottom)) : a.top + a.height * 0.7) + 4; };
       yield layer('front');
-      yield teleport(ENTER < 0 ? -RW : innerWidth + RW, ground());
+      yield teleport(ENTER < 0 ? area().left - RW : area().right + RW, ground());
       const freeCards = S.cards.filter(free);
       let target = freeCards.length ? pick(freeCards) : null;
       claim(target);
-      yield move(target ? clamp(target.left + target.width * 0.5, RW, innerWidth - RW) : innerWidth * 0.5, ground());
+      { const a = area(); yield move(target ? clamp(target.left + target.width * 0.5, a.left + RW, a.right - RW) : a.left + a.width * 0.5, ground()); }
       yield wave(remark(), 2.6);
       // stays in front of the cards: strolls from card to card along the ground, remarks, hops, waits
       while (true) {
         scanCards();
         const gy = ground();
-        const cards = S.cards.filter(free);
+        const cards = S.cards.filter(free), a = area();
         let x;
         if (cards.length && Math.random() < 0.7) {
           const c = pick(cards);
           claim(c);
-          x = clamp(c.left + c.width * rand(0.25, 0.75), RW, innerWidth - RW);
+          x = clamp(c.left + c.width * rand(0.25, 0.75), a.left + RW, a.right - RW);
         } else {
           release();
-          x = rand(RW * 1.2, innerWidth - RW * 1.2);
+          x = rand(a.left + RW * 1.2, a.right - RW * 1.2);
         }
         yield move(x, gy);
         if (Math.random() < 0.35) yield hop();
@@ -447,7 +458,7 @@ window.Robot = (function () {
       if (scanT > 0.15) { scanCards(); scanT = 0; }
       R.clear();
       R.draw(S.layer === 'behind' ? S.cards : null);
-      if (bubble && S.bubbleUntil) { const [hx, hy] = R.headTop(), half = bubble.offsetWidth / 2 + 12; bubble.style.left = clamp(hx, half, innerWidth - half) + 'px'; bubble.style.top = Math.max(hy, 40) + 'px'; }
+      if (bubble && S.bubbleUntil) { const [hx, hy] = R.headTop(), half = bubble.offsetWidth / 2 + 12, a = area(); bubble.style.left = clamp(hx, a.left + half, a.right - half) + 'px'; bubble.style.top = Math.max(hy, a.top + 40) + 'px'; }
     }
 
     let last = performance.now();
