@@ -165,6 +165,7 @@ window.KIOSK_COMPANIONS = function (K) {
         if (!C.meowed && C.t > C.meowAt) { C.meowed = true; bubble.textContent = "Miau."; bubble.classList.add("on"); C.bubbleUntil = C.t + 1.6; }
       } else if (C.leaving) {
         C.active = false; C.mode = null;
+        if (!robotOn) { C.startAt = C.t + 0.5; }   // robot wyłączony w trakcie: kot nie znika do końca produktu, tylko rusza swoją trasą po kartach
       } else {
         C.idleT += dt * tempo(); out.yaw = 0;   // czeka obok robota twarzą do widza
         if (C.idleT > 1.2 && Math.random() < dt * tempo() * 0.35) { C.stretchUntil = C.t + 2.4 + Math.random(); }
