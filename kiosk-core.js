@@ -1,5 +1,6 @@
-/* KIOSK CORE - silnik pętli, chrome sceny, widoki produktowe (projekt 01: diagram), motyw.
-   Cienka powłoka kiosk-flow.html ładuje kiosk-data.js, robot.js i ten plik. */
+/* KIOSK CORE - silnik pętli (zegar scenariusza, tryb auto/ręczny/pauza), chrome sceny, widoki produktowe, postaci (robot, kot, bohaterowie), ustawienia, motyw, watchdog.
+   Cienka powłoka index.html ładuje kiosk-icons.js, kiosk-data.js, robot.js i ten plik.
+   Parametry URL: ?p=N produkt (0-6), ?s=N scenariusz (0-2), ?speed=0.5|0.75|1|1.5|2, ?robot=0|1, ?cat=0|1, ?hero=0|1, ?theme=dark|light (nadpisują localStorage). */
 (function () {
   "use strict";
   // ─── Constants ───
@@ -107,7 +108,7 @@
       "<nav class=\"k-rail\" id=\"kRail\" aria-label=\"Produkty\">" + PRODUCTS.map(function (p, k) { return "<button type=\"button\" data-p=\"" + k + "\" aria-pressed=\"false\">" + esc(p.name) + "</button>"; }).join("") + "</nav>" +
       "<button class=\"k-theme\" id=\"kTheme\" type=\"button\" aria-label=\"Przełącz schemat jasny/ciemny\"><i data-lucide=\"sun\" class=\"icon ico-sun\"></i><i data-lucide=\"moon\" class=\"icon ico-moon\"></i></button></header>" +
       "<div class=\"k-headline\"><div class=\"k-copy\" id=\"kCopy\"><h1 class=\"k-h1\" id=\"kName\"></h1><p class=\"k-tagline\" id=\"kTag\"></p></div>" +
-      "<p class=\"k-phase\"><span class=\"k-phase-dot\" aria-hidden=\"true\"></span><span class=\"k-phase-text\" id=\"kPhase\"></span></p></div>" +
+      "<p class=\"k-phase\"><span class=\"k-phase-dot\" aria-hidden=\"true\"></span><span class=\"k-phase-text\" id=\"kPhase\" role=\"status\" aria-live=\"polite\"></span></p></div>" +
       "<div id=\"kView\"></div>" +
       "<footer class=\"k-bar\"><div class=\"k-area\"><div class=\"k-tabs\" id=\"kTabs\" role=\"group\" aria-label=\"Scenariusze\"></div>" +
       "<div class=\"k-prog-row\"><span class=\"k-mode\" id=\"kMode\">Tryb automatyczny</span><div class=\"k-prog\" id=\"kProgBar\" role=\"progressbar\" aria-label=\"Postęp scenariusza\" aria-valuemin=\"0\" aria-valuemax=\"100\" aria-valuenow=\"0\"><i id=\"kProg\"></i></div><span class=\"k-idle\">Powrót do pętli za <b id=\"kIdle\">20</b> s</span></div></div>" +
@@ -131,7 +132,7 @@
     Array.prototype.forEach.call(refs.tabs.children, function (t) { t.addEventListener("click", function () { select(parseInt(t.getAttribute("data-scn"), 10)); }); });
   }
 
-  // ─── Render: projekt 01 (diagram) ───
+  // ─── Render: widok domyślny (diagram pytanie → proces → wynik; Zagłoba) ───
   function flowView(p) {
     refs.view.innerHTML = "<div class=\"fl-wrap\"><div class=\"fl\">" +
       "<div class=\"fl-node\" id=\"fQ\"><span class=\"fl-no\">01</span><h3><i data-lucide=\"" + p.nodes.input.icon + "\" class=\"icon\"></i>" + esc(p.nodes.input.title) + "</h3><p class=\"fl-q\" id=\"fQT\"></p></div>" +
@@ -164,7 +165,7 @@
     };
   }
 
-  // ─── Widoki produktowe (projekt 01): każdy produkt ma własny kształt sceny ───
+  // ─── Widoki produktowe: każdy produkt ma własny kształt sceny ───
   function card(cls, id, icon, title, sub, extra) {
     return "<div class=\"card " + cls + "\" id=\"" + id + "\"><h3><i data-lucide=\"" + icon + "\" class=\"icon\"></i><span>" + esc(title) + "</span></h3>" + (sub ? "<div class=\"sub\">" + esc(sub) + "</div>" : "") + (extra || "") + "</div>";
   }
@@ -492,6 +493,7 @@
   }
   // Tryb automatyczny: jeden scenariusz z każdej symulacji, w kolejnym obiegu następny scenariusz
   function advanceAuto() {
+    if (reloadDue) { location.reload(); return; }
     let k = (pi + 1) % PRODUCTS.length;
     if (k === 0) { pass += 1; }
     play(k, pass % PRODUCTS[k].scenarios.length);
@@ -511,7 +513,10 @@
     refs.idle.textContent = idleLeft;
     setState(st.getAttribute("data-state") || "playing");
     idleTick = setInterval(function () { idleLeft -= 1; refs.idle.textContent = Math.max(0, idleLeft); }, 1000);
-    idleT = setTimeout(function () { stopIdle(); manual = false; st.setAttribute("data-mode", "loop"); advanceAuto(); }, IDLE_MS);
+    idleT = setTimeout(function () {   // powrót do pętli: trwający scenariusz dogrywa się do końca (koniec sam przełącza dalej), pauza i "done" przełączają od razu
+      stopIdle(); manual = false; st.setAttribute("data-mode", "loop");
+      if (st.getAttribute("data-state") === "playing") { setState("playing"); } else { advanceAuto(); }
+    }, IDLE_MS);
   }
   function select(i) { touch(); play(pi, i); }
   function selectProduct(k) { touch(); play(k, 0); }
@@ -897,17 +902,17 @@
   }
 
   // ─── Motyw (zapamiętany w localStorage) ───
+  let theme = "dark";
+  function applyTheme(t) {
+    theme = t;
+    st.classList.toggle("t-dark", t === "dark"); st.classList.toggle("t-light", t === "light");
+    refs.logo.src = LOGO[t]; st.setAttribute("data-theme", t);
+    try { localStorage.setItem("kiosk-theme", t); } catch (e) {}
+  }
   function initTheme() {
-    let key = "kiosk-theme", theme = "dark";
-    try { theme = localStorage.getItem(key) === "light" ? "light" : "dark"; } catch (e) {}
-    function apply(t) {
-      theme = t;
-      st.classList.toggle("t-dark", t === "dark"); st.classList.toggle("t-light", t === "light");
-      refs.logo.src = LOGO[t]; st.setAttribute("data-theme", t);
-      try { localStorage.setItem(key, t); } catch (e) {}
-    }
-    refs.theme.addEventListener("click", function () { apply(theme === "dark" ? "light" : "dark"); });
-    apply(theme);
+    try { theme = localStorage.getItem("kiosk-theme") === "light" ? "light" : "dark"; } catch (e) {}
+    refs.theme.addEventListener("click", function () { applyTheme(theme === "dark" ? "light" : "dark"); });
+    applyTheme(theme);
   }
 
   // ─── Listeners ───
@@ -933,13 +938,30 @@
       else if (e.key === "Escape") { togglePop(false); }
       else if (e.key === "f" || e.key === "F") { act("full"); }
     });
-    let wakeLock = (navigator.wakeLock && navigator.wakeLock.request) ? function () { navigator.wakeLock.request("screen").catch(function () {}); } : function () {};
+    // Blokada wygaszania ekranu: od startu (nie wymaga dotknięcia), ponawiana po zwolnieniu i po powrocie karty
+    let lock = null;
+    function wakeLock() {
+      if (!navigator.wakeLock || document.hidden || lock) { return; }
+      navigator.wakeLock.request("screen").then(function (l) { lock = l; l.addEventListener("release", function () { lock = null; setTimeout(wakeLock, 1000); }); }).catch(function () { setTimeout(wakeLock, 30000); });
+    }
     document.addEventListener("visibilitychange", function () {
       if (document.hidden) { if (st.getAttribute("data-state") === "playing") { pause(); hiddenPaused = true; } return; }
       wakeLock();   // przeglądarka zwalnia blokadę przy ukryciu karty
       if (hiddenPaused) { hiddenPaused = false; resume(); }
     });
-    document.addEventListener("pointerdown", wakeLock, { once: true });
+    wakeLock();
+  }
+
+  // ─── Watchdog: całodzienna praca stoiska. Błąd skryptu przeładowuje stronę; co kilka godzin przeładowanie na granicy scenariusza zwalnia pamięć ───
+  const RELOAD_AFTER_ERROR_MS = 5000, RELOAD_EVERY_MS = 4 * 3600 * 1000;
+  let reloadDue = false;
+  function watchdog() {
+    function reload() { try { sessionStorage.setItem("kiosk-resume", pi + "," + si); } catch (e) {} location.reload(); }
+    let errT = null;
+    function onError() { if (!errT) { errT = setTimeout(reload, RELOAD_AFTER_ERROR_MS); } }
+    addEventListener("error", onError);
+    addEventListener("unhandledrejection", onError);
+    setTimeout(function () { reloadDue = true; }, RELOAD_EVERY_MS);
   }
 
   // ─── Init ───
@@ -953,17 +975,19 @@
   initTheme();
   listen();
   setSpeed(SPEEDS.indexOf(speed) >= 0 ? speed : 1);
-  let robotPref = "1";
-  try { robotPref = localStorage.getItem("kiosk-robot") || "1"; } catch (e) {}
-  setRobot(robotPref === "1");
-  let catPref = "1";
-  try { catPref = localStorage.getItem("kiosk-cat") || "1"; } catch (e) {}
-  setCat(catPref === "1");
-  let heroPref = "1";
-  try { heroPref = localStorage.getItem("kiosk-hero") || "1"; } catch (e) {}
-  setHero(heroPref === "1");
+  // Parametry URL nadpisują localStorage (profil przeglądarki kiosku bywa czyszczony; skrypt startowy może ustawić wszystko w adresie)
+  const URLP = new URLSearchParams(location.search);
+  function pref(key, fallback) { let v = URLP.get(key); if (v !== null) { return v; } try { return localStorage.getItem("kiosk-" + key) || fallback; } catch (e) { return fallback; } }
+  if (SPEEDS.indexOf(parseFloat(URLP.get("speed"))) >= 0) { setSpeed(parseFloat(URLP.get("speed"))); }
+  if (URLP.get("theme") === "light" || URLP.get("theme") === "dark") { applyTheme(URLP.get("theme")); }
+  setRobot(pref("robot", "1") === "1");
+  setCat(pref("cat", "1") === "1");
+  setHero(pref("hero", "1") === "1");
   st.setAttribute("data-mode", "loop");
-  let startP = parseInt(new URLSearchParams(location.search).get("p") || "0", 10);
-  play(isNaN(startP) ? 0 : Math.max(0, Math.min(PRODUCTS.length - 1, startP)), 0);
+  watchdog();
+  let startP = parseInt(URLP.get("p") || "0", 10), startS = parseInt(URLP.get("s") || "0", 10) || 0;
+  try { let r = sessionStorage.getItem("kiosk-resume"); if (r) { sessionStorage.removeItem("kiosk-resume"); startP = parseInt(r.split(",")[0], 10); startS = parseInt(r.split(",")[1], 10) || 0; } } catch (e) {}   // po przeładowaniu z błędu: ten sam produkt i scenariusz
+  startP = isNaN(startP) ? 0 : Math.max(0, Math.min(PRODUCTS.length - 1, startP));
+  play(startP, Math.max(0, Math.min(PRODUCTS[startP].scenarios.length - 1, startS)));
   window.KIOSK = { play: play, select: select, selectProduct: selectProduct, act: act, setRobot: setRobot, setCat: setCat, setHero: setHero, heroNow: function (kind) { if (hero) { hero.launch(kind); } }, heroState: function () { return hero ? hero.state : null; }, catAgain: function () { if (cat) { cat.again(); } }, catState: function () { return cat ? cat.state : null; }, setSpeed: setSpeed, products: PRODUCTS };
 })();

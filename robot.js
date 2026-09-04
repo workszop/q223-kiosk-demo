@@ -1,5 +1,5 @@
 /* ROBOT - voxel (3D block) robots rendered smoothly on a full-resolution canvas + a stage director for the kiosk (the robot stays in front of the cards).
-   Loaded by kiosk-flow.html; kiosk-core.js turns the robot and the cat on from the settings popover.
+   Loaded by index.html; kiosk-core.js turns the robot, the cat and the heroes on from the settings popover.
    API:  Robot.create({ canvas, model, unit })  -> renderer   (pose in CSS px, feet anchor; unit = CSS px per voxel, a number or a function re-read on resize())
          Robot.kiosk({ renderer, stage, view, bubble, remarks, cardSelector, speed, walkSpeed, bounds }) -> director
          (speed: optional () => number, the kiosk tempo multiplier; walking, waiting and hopping scale with it;

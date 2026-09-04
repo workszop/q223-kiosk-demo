@@ -3,13 +3,12 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Quantica Lab · Prezentacja stoiskowa · projekt 01: diagram</title>
+<title>Quantica Lab · Prezentacja stoiskowa</title>
 <!--
   KIOSK (index.html) - cienka powłoka: siedem symulacji w pętli, projekt "flow".
-  Dane: kiosk-data.js · ikony: kiosk-icons.js (lokalnie, bez CDN) · silnik i widoki: kiosk-core.js · robot i kot: robot.js (włączane w ustawieniach) · style: kiosk.css.
-  Parametr ?p=N startuje od produktu N (0-6). Pętla automatyczna: jeden scenariusz z każdej symulacji, w kolejnym obiegu następny scenariusz. Klawisze: 1-3 scenariusz, S ustawienia, Esc zamyka ustawienia, spacja pauza, ←/→ scenariusz, ↑/↓ produkt, R od nowa, F pełny ekran.
+  Dane: kiosk-data.js · ikony: kiosk-icons.js (lokalnie, bez CDN) · fonty: theme.css + fonts/ (lokalnie) · silnik i widoki: kiosk-core.js · robot, kot i bohaterowie: robot.js (włączane w ustawieniach) · style: kiosk.css.
+  Parametry URL: ?p=N produkt (0-6), ?s=N scenariusz, ?speed=, ?robot=0, ?cat=0, ?hero=0, ?theme=light (nadpisują localStorage). Pętla automatyczna: jeden scenariusz z każdej symulacji, w kolejnym obiegu następny scenariusz. Klawisze: 1-3 scenariusz, S ustawienia, Esc zamyka ustawienia, spacja pauza, ←/→ scenariusz, ↑/↓ produkt, R od nowa, F pełny ekran.
 -->
-<link rel="preconnect" href="https://cdn.fontshare.com" crossorigin>
 <link rel="stylesheet" href="theme.css">
 <link rel="stylesheet" href="kiosk.css">
 <style>html, body { margin: 0; background: var(--ink); overflow: hidden; }</style>
@@ -19,9 +18,9 @@
 <canvas id="robot" aria-hidden="true" hidden></canvas>
 <canvas id="cat" aria-hidden="true" hidden></canvas>
 <canvas id="hero" aria-hidden="true" hidden></canvas>
-<div class="robot-wrap"><div class="robot-bubble off" id="robotBubble" role="status" aria-live="polite"></div></div>
-<div class="robot-wrap cat-wrap"><div class="robot-bubble off" id="catBubble" role="status" aria-live="polite"></div></div>
-<div class="robot-wrap hero-wrap"><div class="robot-bubble roar off" id="heroBubble" role="status" aria-live="polite"></div></div>
+<div class="robot-wrap" aria-hidden="true"><div class="robot-bubble off" id="robotBubble"></div></div>
+<div class="robot-wrap cat-wrap" aria-hidden="true"><div class="robot-bubble off" id="catBubble"></div></div>
+<div class="robot-wrap hero-wrap" aria-hidden="true"><div class="robot-bubble roar off" id="heroBubble"></div></div>
 <script src="kiosk-icons.js"></script>
 <script src="kiosk-data.js"></script>
 <script src="robot.js"></script>

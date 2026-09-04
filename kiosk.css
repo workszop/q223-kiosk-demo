@@ -7,9 +7,7 @@
   --deep-berry: #8A004C;
   --magenta-tint: #FFE6F1;
   --ink: #0A1F2C;
-  --ink-2: #0d2538;
   --ink-3: #14324a;
-  --paper: #FDFCFB;
   --white: #FFFFFF;
   --fg-1: #111111;
   --fg-3: #4B5563;
@@ -33,14 +31,11 @@
   --pink-a18: rgba(210,7,87,0.18);
   --pink-a30: rgba(210,7,87,0.30);
   --pink-a12: rgba(210,7,87,0.12);
-  --ink-a06: rgba(10,31,44,0.06);
   --ink-a12: rgba(10,31,44,0.12);
   --ink-a40: rgba(10,31,44,0.40);
   --font-display: "Satoshi", system-ui, -apple-system, sans-serif;
   --font-mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
-  --radius-lg: 16px;
   --gallery-bg: #ECEEF2;
-  --stage-w: 1400px;
   --ok: #1B9E63;
   --ok-tint: #E2F6EB;
   --bad: #D3302F;
@@ -179,7 +174,7 @@ button { font: inherit; }
 .k-headline { position: absolute; top: 6.4cqw; left: 2.6cqw; right: 2.6cqw; z-index: 4; display: flex; align-items: flex-end; justify-content: space-between; gap: 3cqw; }
 .k-copy { min-width: 0; display: flex; align-items: baseline; gap: 1.4cqw; flex-wrap: wrap; transition: opacity 300ms, transform 300ms; }
 .k-copy.swap { opacity: 0; transform: translateY(0.4cqw); }
-.k-h1 { margin: 0; white-space: nowrap; color: var(--st-fg); font-size: 3.4cqw; font-weight: 900; letter-spacing: -0.035em; line-height: 0.98; }
+.k-h1 { margin: 0; white-space: nowrap; color: var(--st-fg); font-size: 3.4cqw; font-weight: 700; letter-spacing: -0.035em; line-height: 0.98; }
 .k-tagline { margin: 0; white-space: nowrap; color: var(--st-muted); font-size: 1.5cqw; font-weight: 500; letter-spacing: -0.01em; line-height: 1.1; }
 .k-tagline em { font-style: normal; color: var(--quantica-pink); }
 .k-phase {
@@ -407,12 +402,16 @@ button { font: inherit; }
 .km-lane-h { display: flex; gap: 0.6em; align-items: center; font-size: 1.25cqw; font-weight: 700; }
 .km-lane-h .icon { color: var(--st-faint); }
 .km-lane .sub { font-family: var(--font-mono); font-size: 0.75cqw; letter-spacing: 0.06em; color: var(--st-muted); }
-.km-stamp.show { opacity: 1; transform: rotate(-4deg) scale(1); }
+.km-stamp.show { opacity: 1; transform: rotate(-3deg) scale(1); }
 .km-stamp.ok { color: var(--teal); border-color: var(--teal); }
-.km-stamp {
+.km-stamp {   /* długi tekst plakietki łamie się w środku pieczątki; obrót wokół lewej krawędzi, więc nie wychodzi poza kartę */
   display: inline-flex;
   gap: 0.6em;
-  align-items: center;
+  align-items: flex-start;
+  max-width: 100%;
+  line-height: 1.35;
+  text-wrap: balance;
+  transform-origin: left center;
   margin-top: 0.5cqw;
   font-family: var(--font-mono);
   font-size: 0.72cqw;
@@ -432,7 +431,7 @@ button { font: inherit; }
 .km-analysis.done { background: var(--node-done-bg); color: var(--st-fg); border-color: var(--node-done-border); box-shadow: none; }
 .km-chip b { font-family: var(--font-mono); font-size: 0.72cqw; font-weight: 500; letter-spacing: 0.12em; text-transform: uppercase; color: var(--card-muted); }
 .km-analysis.done .km-chip b { color: var(--st-muted); }
-.km-chip span { font-weight: 600; }
+.km-chip span { font-weight: 700; }
 .km-chip.hot { border-color: var(--quantica-pink); color: inherit; border-left-color: var(--quantica-pink); }
 .km-chip.hot span { color: var(--quantica-pink); }
 .km-analysis.done .km-chip { border-left-color: var(--st-line-2); }
@@ -693,7 +692,7 @@ button { font: inherit; }
   transition: opacity 400ms;
 }
 .pa-task.show { opacity: 1; }
-.pa-task b { color: var(--quantica-pink); font-weight: 600; }
+.pa-task b { color: var(--quantica-pink); font-weight: 700; }
 .pa-docs { display: flex; flex-direction: column; justify-content: flex-end; gap: 0.6cqw; }
 .pa-doc {
   background: var(--card-bg);
@@ -704,7 +703,7 @@ button { font: inherit; }
   gap: 0.7em;
   align-items: center;
   font-size: 1.15cqw;
-  font-weight: 600;
+  font-weight: 700;
   box-shadow: var(--node-on-shadow);
   opacity: 0;
   transform: translateY(1cqw);
@@ -852,7 +851,7 @@ button { font: inherit; }
 .oc-task.on .icon, .oc-task.done .icon { color: var(--quantica-pink); }
 .oc-task small { font-family: var(--font-mono); font-size: 0.8cqw; letter-spacing: 0.14em; text-transform: uppercase; color: var(--st-muted); }
 .oc-task.on small { color: var(--card-muted); }
-.oc-q { margin: 0; font-size: 1.5cqw; font-weight: 600; line-height: 1.25; letter-spacing: -0.01em; }
+.oc-q { margin: 0; font-size: 1.5cqw; font-weight: 700; line-height: 1.25; letter-spacing: -0.01em; }
 .oc-samples { opacity: 0; transition: opacity 400ms; display: flex; flex-direction: column; min-height: 0; }
 .oc-samples > div { display: flex; flex-direction: column; gap: 0.6cqw; }
 .oc-s {
